@@ -18,17 +18,17 @@ DTYPE='float32'
 
 def preprocess_data(data, store_dir, mean_image=None):
     num_images = len(data[0])
-    data_images = np.zeros((num_images, 784))
+    data_images = np.zeros((num_images, 784)).astype(DTYPE)
     ## use image files from mnist and store as npy. Compute and store mean image.
     for i in range(len(data[0])):
         data_images[i,:] = np.asarray(data[0][i]).astype(DTYPE)/255
     if mean_image is None:
-        mean_image = np.mean(data_images, axis=0)
+        mean_image = np.mean(data_images, axis=0).astype(DTYPE)
         np.save(os.path.join(store_dir, 'image_mean.npy'), mean_image)
     data_images = data_images - mean_image
     np.save(os.path.join(store_dir, 'images.npy'), data_images)
     ## use labels from mnist and store as single .npy file. 
-    data_labels = np.zeros(num_images)
+    data_labels = np.zeros(num_images).astype('int32')
     for i in range(len(data[0])):
         data_labels[i] = int(data[1][i])
     np.save(os.path.join(store_dir, 'labels.npy'), data_labels)
@@ -51,4 +51,4 @@ data_training = mndata.load_training() # dt is a 2D list of length 2. dt[0] is a
 data_testing = mndata.load_testing() # dt is a 2D list of length 2. dt[0] is a list of 60,000 images. dt[1] is a list of 60,000 labels.
 
 mean_image = preprocess_data(data_training, dir_train)
-preprocess_data(data_testing, dir_test)
+preprocess_data(data_testing, dir_test, mean_image=mean_image)

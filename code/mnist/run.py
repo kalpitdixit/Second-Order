@@ -3,56 +3,73 @@ import numpy as np
 
 import theano
 import theano.tensor as T
+from theano.gof import Variable as V
 import keras
+from keras import backend as K
 from keras.layers import Input, Dense, Activation
 from keras.models import Model
-import lasagne
+from keras import optimizers
+from keras.optimizers import SGD
+from keras.backend import categorical_crossentropy
 
-from utils import *
+from data_handler import Dataset
 
-class Config():
+class Config(object):
     def __init__(self):
-        self.input_dim = 784
+        self.input_dim  = 784
+        self.output_dim = 10
+        self.max_epochs = 1
+        self.batch_size = 128
+        self.learning_rate = 1e-2
+        self.momentum = 0.99
+
 
 def create_feedforward_classifier_model(cfg=Config()):
-    input_images = Input(shape=(None,cfg.input_dim), name='input_images')
+    input_images = Input(shape=(cfg.input_dim,), name='input_images')
     h1 = Dense(1000,activation='relu',name='h1')(input_images)
     h2 = Dense(1000,activation='relu',name='h2')(h1)
-    pre_softmax = Dense(10,activation='linear',name='pre_softmax')(h2)
-    output = Activation('softmax')(pre_softmax)
-    model = Model(input=input_images, output=output)
+    output = Dense(cfg.output_dim,activation='softmax',name='outmax')(h2)
+    model = Model(input=input_images,output=output)
     return model
     
 
-def build_train_fn(model):
-    ### cost
-    lr = T.scalar()
-    input_images = model.inputs[0]
-    labels = K.placeholder(ndim=2, dtype='int32')
-
-    softmax_outputs = model.outputs[0]
-    cost = categorical_crossentropy(softmax_outputs, labels).mean()
-
-    ### gradients
-    trainable_vars = model.trainable_weights
-    grads = K.gradients(cost, trainable_vars)
-    grads = lasagne.updates.total_norm_constraint(grads, 100)
-    updates = lasagne.updates.nesterov_momentum(grads, trainable_vars, lr, momentum=0.99)
-    for key, val in model.updates: # needed like this to update for batch normalization
-        updates[key] = val
-
-    ### train_fn
-    train_fn = K.function([input_images, labels, K.learning_phase(), lr],
-                          [softmax_outputs, cost],
-                          updates=updates)
-
-    return train_fn
+def compile_model(model, cfg):
+    sgd = SGD(lr=cfg.learning_rate, momentum=cfg.momentum)
+    model.compile(optimizer=sgd,
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+    return
     
-    
+def train(model, dataset, cfg):
+    for epoch in range(cfg.max_epochs):
+        inds = range(dataset.n_train)
+        np.random.shuffle(inds)
+        tot_batches = int(np.ceil(1.0*dataset.n_train/cfg.batch_size))
+        all_labels = np.zeros((dataset.n_train, cfg.output_dim))
+        all_labels[:,dataset.data['train_labels']] = 1
+        history = model.fit(x = dataset.data['train_images'], 
+                            y = all_labels, 
+                            batch_size = cfg.batch_size,
+                            epochs = 5)
+        exit()
+        for batch_num in range(tot_batches):
+            batch_inds = inds[batch_num*cfg.batch_size:min((batch_num+1)*cfg.batch_size,dataset.n_train)]
+            batch_labels = np.zeros((len(batch_inds), cfg.output_dim))
+            batch_labels[:,dataset.data['train_labels'][batch_inds]] = 1
+            history = model.fit(x = dataset.data['train_images'][batch_inds,:], 
+                                y = batch_labels, 
+                                batch_size = cfg.batch_size,
+                                epochs = 1)
+            #print type(history)
+            #print history
+            #exit()
+                
 
 if __name__=="__main__":
     data_dir = '/atlas/u/kalpit/data'
-    #data = get_data(data_dir)
+    dataset = Dataset(data_dir)
+    cfg = Config()
     model = create_feedforward_classifier_model()
     model.summary()
-    train_fn = build_train_fn(model)
+    compile_model(model, cfg)
+    train(model, dataset, cfg)
