@@ -18,7 +18,7 @@ class Config(object):
     def __init__(self):
         self.input_dim  = 784
         self.output_dim = 10
-        self.max_epochs = 1
+        self.max_epochs = 10
         self.batch_size = 128
         self.learning_rate = 1e-2
         self.momentum = 0.99
@@ -28,7 +28,7 @@ def create_feedforward_classifier_model(cfg=Config()):
     input_images = Input(shape=(cfg.input_dim,), name='input_images')
     h1 = Dense(1000,activation='relu',name='h1')(input_images)
     h2 = Dense(1000,activation='relu',name='h2')(h1)
-    output = Dense(cfg.output_dim,activation='softmax',name='outmax')(h2)
+    output = Dense(cfg.output_dim,activation='softmax',name='softmax')(h2)
     model = Model(input=input_images,output=output)
     return model
     
@@ -45,17 +45,10 @@ def train(model, dataset, cfg):
         inds = range(dataset.n_train)
         np.random.shuffle(inds)
         tot_batches = int(np.ceil(1.0*dataset.n_train/cfg.batch_size))
-        all_labels = np.zeros((dataset.n_train, cfg.output_dim))
-        all_labels[:,dataset.data['train_labels']] = 1
-        history = model.fit(x = dataset.data['train_images'], 
-                            y = all_labels, 
-                            batch_size = cfg.batch_size,
-                            epochs = 5)
-        exit()
         for batch_num in range(tot_batches):
             batch_inds = inds[batch_num*cfg.batch_size:min((batch_num+1)*cfg.batch_size,dataset.n_train)]
             batch_labels = np.zeros((len(batch_inds), cfg.output_dim))
-            batch_labels[:,dataset.data['train_labels'][batch_inds]] = 1
+            batch_labels[range(len(batch_inds)),dataset.data['train_labels'][batch_inds]] = 1
             history = model.fit(x = dataset.data['train_images'][batch_inds,:], 
                                 y = batch_labels, 
                                 batch_size = cfg.batch_size,
