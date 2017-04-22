@@ -1,3 +1,6 @@
+import sys
+sys.stdout = open('/atlas/u/kalpit/Second-Order/code/mnist/output', 'w')
+
 import os
 import numpy as np
 
@@ -18,7 +21,7 @@ class Config(object):
     def __init__(self):
         self.input_dim  = 784
         self.output_dim = 10
-        self.max_epochs = 10
+        self.max_epochs = 1
         self.batch_size = 128
         self.learning_rate = 1e-2
         self.momentum = 0.99
@@ -41,6 +44,8 @@ def compile_model(model, cfg):
     return
     
 def train(model, dataset, cfg):
+    rec_loss = [] # record_loss
+    rec_acc = [] # record_accuracy
     for epoch in range(cfg.max_epochs):
         inds = range(dataset.n_train)
         np.random.shuffle(inds)
@@ -53,9 +58,14 @@ def train(model, dataset, cfg):
                                 y = batch_labels, 
                                 batch_size = cfg.batch_size,
                                 epochs = 1)
-            #print type(history)
-            #print history
-            #exit()
+            rec_loss.append(history.history['loss'])
+            rec_acc.append(history.history['acc'])
+    val_labels = np.zeros((dataset.n_val,cfg.output_dim))
+    val_labels[range(dataset.n_val),dataset.data['val_labels']] = 1
+    model.evaluate(x = dataset.data['val_images'],
+                   y = val_labels,
+                   batch_size = cfg.batch_size)
+    return
                 
 
 if __name__=="__main__":
