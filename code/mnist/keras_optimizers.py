@@ -123,14 +123,16 @@ class BB(Optimizer):
 
         # bb
         SHAPES = [K.get_variable_shape(p) for p in params]
+        NPARAMS = [np.prod(shape).astype('float32') for shape in SHAPES]
         WPREV  = [theano.shared(value=np.random.normal(size=shape).astype('float32')) for shape in SHAPES] # previous weights
         GPREV  = [theano.shared(value=np.random.normal(size=shape).astype('float32')) for shape in SHAPES] # previous weights
-        #WPREV  = [K.zeros(shape) for shape in SHAPES] # previous weights
-        #GPREV  = [k.zeros(shape) for shape in shapes] # prev gradients (grads)
-        #WPREV  = [K.variable(np.random.normal(shape)) for shape in SHAPES] # previous weights
-        #GPREV  = [K.variable(np.random.normal(shape)) for shape in SHAPES] # prev gradients (grads)
-        
-        self.weights = [self.iterations] + WPREV # WHAT???????????????????????/
+        NUM = [theano.shared(0.) for shape in SHAPES]
+        DEN = [theano.shared(0.) for shape in SHAPES]
+        LR = [theano.shared(0.) for shape in SHAPES]
+        LR1 = theano.shared(1.)
+
+        #self.weights = WPREV + GPREV
+        self.weights = WPREV + GPREV + LR + NUM + DEN # lr display hack
 
         for i in range(len(params)):
             wprev = WPREV[i]
@@ -140,7 +142,14 @@ class BB(Optimizer):
             gcurr = grads[i]
 
             p = params[i]
-            new_p = p - ((wcurr-wprev)*(wcurr-wprev)).sum()/((wcurr-wprev)*(gcurr-gprev)+1e-6).sum()/10000 * gcurr
+
+            self.updates.append(K.update(NUM[i], ((wcurr-wprev)*(wcurr-wprev)).sum() * LR1))
+            self.updates.append(K.update(DEN[i], ((wcurr-wprev)*(gcurr-gprev)).sum() * LR1))
+            new_p = p - K.abs(((wcurr-wprev)*(wcurr-wprev)).sum()/(((wcurr-wprev)*(gcurr-gprev)).sum()+1e-8)) * gcurr
+
+            #### lr display hack ####
+            self.updates.append(K.update(LR[i], K.abs(((wcurr-wprev)*(wcurr-wprev)).sum()/(((wcurr-wprev)*(gcurr-gprev)).sum()+1e-8))*LR1))
+            #### ####
 
             # updates internal
             self.updates.append(K.update(wprev, wcurr))
