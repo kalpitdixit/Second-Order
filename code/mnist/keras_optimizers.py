@@ -126,13 +126,15 @@ class BB(Optimizer):
         NPARAMS = [np.prod(shape).astype('float32') for shape in SHAPES]
         WPREV  = [theano.shared(value=np.random.normal(size=shape).astype('float32')) for shape in SHAPES] # previous weights
         GPREV  = [theano.shared(value=np.random.normal(size=shape).astype('float32')) for shape in SHAPES] # previous weights
-        NUM = [theano.shared(0.) for shape in SHAPES]
-        DEN = [theano.shared(0.) for shape in SHAPES]
-        LR = [theano.shared(0.) for shape in SHAPES]
-        LR1 = theano.shared(1.)
-
-        #self.weights = WPREV + GPREV
-        self.weights = WPREV + GPREV + LR + NUM + DEN # lr display hack
+        self.weights = WPREV + GPREV
+        debug = False
+        ###i
+        if debug:
+            LR = [theano.shared(0.) for shape in SHAPES]
+            LR1 = theano.shared(1.)
+            GCURR = [theano.shared(value=np.random.normal(size=shape).astype('float32')) for shape in SHAPES] # update to weights
+            self.weights = WPREV + GPREV + LR + GCURR # lr display hack
+        ###
 
         for i in range(len(params)):
             wprev = WPREV[i]
@@ -142,13 +144,18 @@ class BB(Optimizer):
             gcurr = grads[i]
 
             p = params[i]
-
-            self.updates.append(K.update(NUM[i], ((wcurr-wprev)*(wcurr-wprev)).sum() * LR1))
-            self.updates.append(K.update(DEN[i], ((wcurr-wprev)*(gcurr-gprev)).sum() * LR1))
-            new_p = p - K.abs(((wcurr-wprev)*(wcurr-wprev)).sum()/(((wcurr-wprev)*(gcurr-gprev)).sum()+1e-8)) * gcurr
+            #lr    = ((wcurr-wprev)*(wcurr-wprev)).sum()/(((wcurr-wprev)*(gcurr-gprev)).sum()+1e-8)
+            #lr    = ((gcurr-gprev)*(gcurr-gprev)).sum()/(((wcurr-wprev)*(gcurr-gprev)).sum()+1e-8)
+            lr    = ((gcurr-gprev)*(gcurr-gprev))/(((wcurr-wprev)*(gcurr-gprev))+1e-8)
+            lr    = K.clip(lr, 0, 1e-1)
+            lr    = K.abs(lr)
+            upd_p = lr * gcurr
+            new_p = p - upd_p
 
             #### lr display hack ####
-            self.updates.append(K.update(LR[i], K.abs(((wcurr-wprev)*(wcurr-wprev)).sum()/(((wcurr-wprev)*(gcurr-gprev)).sum()+1e-8))*LR1))
+            if debug:
+                self.updates.append(K.update(LR[i], lr*LR1))
+                self.updates.append(K.update(GCURR[i], gcurr))
             #### ####
 
             # updates internal

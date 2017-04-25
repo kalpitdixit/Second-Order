@@ -91,9 +91,12 @@ def train(model, dataset, cfg):
                              K.learning_phase(), # train or test mode
             ]
             get_gradients = K.function(inputs=input_tensors, outputs=gradients)
-            print get_gradients([dataset.data['train_images'][batch_inds,:], np.ones(128), batch_labels, False])
-            print [x.name for x in [weights[-1]]]
-            exit()
+            computed_gradients =  get_gradients([dataset.data['train_images'][batch_inds,:], np.ones(128), batch_labels, False])
+            print [x.shape for x in computed_gradients]
+            print computed_gradients[-1]
+            print [x.name for x in model.trainable_weights]
+            if batch_num==1:
+                exit()
             #####
             history = model.fit(x = dataset.data['train_images'][batch_inds,:], 
                                 y = batch_labels, 
