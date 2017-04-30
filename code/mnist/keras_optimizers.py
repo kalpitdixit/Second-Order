@@ -104,17 +104,20 @@ class Optimizer(object):
         return cls(**config)
 
 
-class BB(Optimizer):
-    """Barzilai-Borwein optimizer.
-
-
+class BB(Optimizer): 
+    """Barzilai-Borwein optimizer.  
     # Arguments
         max_lr: upper bound on learning rate
     """
 
-    def __init__(self,
+    def __init__(self, base_lr=1.0, per_param=True, use_abs=False, lbound=0.0, ubound=1.0,
                  **kwargs):
         super(BB, self).__init__(**kwargs)
+        self.base_lr = base_lr
+        self.per_param = per_param
+        self.use_abs = use_abs
+        self.lbound = lbound
+        self.ubound = ubound
         self.iterations = K.variable(0., name='iterations')
 
     def get_updates(self, params, constraints, loss):
@@ -127,11 +130,14 @@ class BB(Optimizer):
         WPREV  = [theano.shared(value=np.random.normal(size=shape).astype('float32')) for shape in SHAPES] # previous weights
         GPREV  = [theano.shared(value=np.random.normal(size=shape).astype('float32')) for shape in SHAPES] # previous weights
         self.weights = WPREV + GPREV
-        debug = False
-        ###i
+        ###
+        debug = True
         if debug:
-            LR = [theano.shared(0.) for shape in SHAPES]
-            LR1 = theano.shared(1.)
+            if self.per_param:
+                LR = [K.zeros(shape) for shape in SHAPES]
+            else:
+                LR = [theano.shared(0.) for shape in SHAPES]
+                LR1 = theano.shared(1.)
             GCURR = [theano.shared(value=np.random.normal(size=shape).astype('float32')) for shape in SHAPES] # update to weights
             self.weights = WPREV + GPREV + LR + GCURR # lr display hack
         ###
@@ -144,17 +150,26 @@ class BB(Optimizer):
             gcurr = grads[i]
 
             p = params[i]
-            #lr    = ((wcurr-wprev)*(wcurr-wprev)).sum()/(((wcurr-wprev)*(gcurr-gprev)).sum()+1e-8)
-            #lr    = ((gcurr-gprev)*(gcurr-gprev)).sum()/(((wcurr-wprev)*(gcurr-gprev)).sum()+1e-8)
-            lr    = ((gcurr-gprev)*(gcurr-gprev))/(((wcurr-wprev)*(gcurr-gprev))+1e-8)
-            lr    = K.clip(lr, 0, 1e-1)
-            lr    = K.abs(lr)
+            if self.per_param:
+                lr = ((gcurr-gprev)*(gcurr-gprev))/(((wcurr-wprev)*(gcurr-gprev))+1e-8) # per - parameter
+                lr = ((wcurr-wprev)*(wcurr-wprev)+1e-8)/(((wcurr-wprev)*(gcurr-gprev))+1e-8) # per - parameter
+                #lr = lr / (wcurr*wcurr+1)i
+                lr = 1e-1 * lr
+            else:
+                lr = ((gcurr-gprev)*(gcurr-gprev)).sum()/(((wcurr-wprev)*(gcurr-gprev)).sum()+1e-8) # per - layer
+            if self.use_abs:
+                lr    = K.abs(lr)
+            lr    = K.clip(lr, self.lbound, self.ubound)
+            lr = self.base_lr * lr
             upd_p = lr * gcurr
             new_p = p - upd_p
 
             #### lr display hack ####
             if debug:
-                self.updates.append(K.update(LR[i], lr*LR1))
+                if self.per_param:
+                    self.updates.append(K.update(LR[i], lr))
+                else:
+                    self.updates.append(K.update(LR[i], lr*LR1))
                 self.updates.append(K.update(GCURR[i], gcurr))
             #### ####
 
@@ -165,8 +180,256 @@ class BB(Optimizer):
         return self.updates
 
     def get_config(self):
-        config = {}
+        config = {'base_lr': self.base_lr,
+                  'per_param': self.per_param,
+                  'use_abs': self.use_abs,
+                  'lbound': float(K.get_value(self.lbound)),
+                  'ubound': float(K.get_value(self.ubound))}
         base_config = super(BB, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+class BB_momentum(Optimizer):
+    """Barzilai-Borwein momentum optimizer.  
+    # Arguments
+        max_lr: upper bound on learning rate
+    """
+
+    def __init__(self, base_lr=1.0, per_param=True, use_abs=False, lbound=0.0, ubound=1.0, rho=0.95,
+                 **kwargs):
+        super(BB_momentum, self).__init__(**kwargs)
+        self.base_lr = base_lr
+        self.per_param = per_param
+        self.use_abs = use_abs
+        self.lbound = lbound
+        self.ubound = ubound
+        self.rho = rho
+        self.iterations = K.variable(0., name='iterations')
+
+    def get_updates(self, params, constraints, loss):
+        grads = self.get_gradients(loss, params)
+        self.updates = []
+
+        # bb
+        SHAPES = [K.get_variable_shape(p) for p in params]
+        NPARAMS = [np.prod(shape).astype('float32') for shape in SHAPES]
+        WPREV  = [theano.shared(value=np.random.normal(size=shape).astype('float32')) for shape in SHAPES] # previous weights
+        GPREV  = [theano.shared(value=np.random.normal(size=shape).astype('float32')) for shape in SHAPES] # previous weights
+        self.weights = WPREV + GPREV
+        ###
+        debug = True
+        if debug:
+            if self.per_param:
+                LR = [K.zeros(shape) for shape in SHAPES]
+            else:
+                LR = [theano.shared(0.) for shape in SHAPES]
+                LR1 = theano.shared(1.)
+            GCURR = [theano.shared(value=np.random.normal(size=shape).astype('float32')) for shape in SHAPES] # update to weights
+            self.weights = WPREV + GPREV + LR + GCURR # lr display hack
+        ###
+
+        for i in range(len(params)):
+            wprev = WPREV[i]
+            wcurr = params[i]
+            
+            gprev = GPREV[i]
+            gcurr = grads[i]
+
+            p = params[i]
+            if self.per_param:
+                #lr = ((gcurr-gprev)*(gcurr-gprev))/(((wcurr-wprev)*(gcurr-gprev))+1e-8) # per - parameter
+                #lr = ((wcurr-wprev)*(wcurr-wprev)+1e-8)/(((wcurr-wprev)*(gcurr-gprev))+1e-8) # per - parameter
+                lr = ((wcurr-wprev)+1e-8)/(((gcurr-gprev))+1e-8) # per - parameter
+                #lr = lr / (wcurr*wcurr+1)i
+            else:
+                raise NotImplementedError
+
+            ## abs, clipping and learning_rate adjustment
+            if self.use_abs:
+                lr = K.abs(lr)
+            lr = K.clip(lr, self.lbound, self.ubound)
+            lr = self.base_lr * lr
+
+            ## parameter update
+            upd_p = lr * gcurr
+            new_p = p - upd_p
+
+            #### lr display hack ####
+            if debug:
+                if self.per_param:
+                    self.updates.append(K.update(LR[i], lr))
+                else:
+                    self.updates.append(K.update(LR[i], lr*LR1))
+                self.updates.append(K.update(GCURR[i], gcurr))
+            #### ####
+
+            # updates internal
+            self.updates.append(K.update(wprev, self.rho*wprev + (1-self.rho)*wcurr))
+            self.updates.append(K.update(gprev, self.rho*gcurr + (1-self.rho)*gcurr))
+            self.updates.append(K.update(p, new_p))
+        return self.updates
+
+    def get_config(self):
+        config = {'base_lr': self.base_lr,
+                  'per_param': self.per_param,
+                  'use_abs': self.use_abs,
+                  'lbound': float(K.get_value(self.lbound)),
+                  'ubound': float(K.get_value(self.ubound)),
+                  'rho': self.rho}
+        base_config = super(BB_momentum, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+class Adadelta_Adam(Optimizer):
+    """adadelta optimizer.
+
+    It is recommended to leave the parameters of this optimizer
+    at their default values.
+
+    # Arguments
+        lr: float >= 0. Learning rate.
+            It is recommended to leave it at the default value.
+        rho: float >= 0.
+        epsilon: float >= 0. Fuzz factor.
+        decay: float >= 0. Learning rate decay over each update.
+
+    # References
+        - [Adadelta - an adaptive learning rate method](http://arxiv.org/abs/1212.5701)
+    """
+
+    def __init__(self, lr=1.0, rho=0.95, epsilon=1e-8, decay=0., beta_1=0.95,
+                 **kwargs):
+        super(Adadelta_Adam, self).__init__(**kwargs)
+        self.lr = K.variable(lr, name='lr')
+        self.rho = rho
+        self.epsilon = epsilon
+        self.decay = K.variable(decay, name='decay')
+        self.initial_decay = decay
+        self.beta_1 = beta_1
+        self.iterations = K.variable(0., name='iterations')
+
+    def get_updates(self, params, constraints, loss):
+        grads = self.get_gradients(loss, params)
+        shapes = [K.get_variable_shape(p) for p in params]
+        accumulators = [K.zeros(shape) for shape in shapes]
+        delta_accumulators = [K.zeros(shape) for shape in shapes]
+        mom = [K.zeros(shape) for shape in shapes]
+        self.weights = accumulators + delta_accumulators
+        self.updates = []
+
+        lr = self.lr
+        if self.initial_decay > 0:
+            lr *= (1. / (1. + self.decay * self.iterations))
+            self.updates.append(K.update_add(self.iterations, 1))
+
+        for p, g, a, d_a, m in zip(params, grads, accumulators, delta_accumulators, mom):
+            # update accumulator
+            new_a = self.rho * a + (1. - self.rho) * K.square(g)
+            self.updates.append(K.update(a, new_a))
+
+            # use the new accumulator and the *old* delta_accumulator
+            update = g * K.sqrt(d_a + self.epsilon) / K.sqrt(new_a + self.epsilon)
+
+            ##### changes #####
+            if True:
+                m_t = (self.beta_1 * m) + (1. - self.beta_1) * g
+                update = 1e-3 * m_t / K.sqrt(d_a + self.epsilon) #/ K.sqrt(new_a + self.epsilon)
+                self.updates.append(K.update(m, m_t))
+            ##### #####
+
+            new_p = p - lr * update
+            # apply constraints
+            if p in constraints:
+                c = constraints[p]
+                new_p = c(new_p)
+            self.updates.append(K.update(p, new_p))
+
+            # update delta_accumulator
+            new_d_a = self.rho * d_a + (1 - self.rho) * K.square(update)
+            self.updates.append(K.update(d_a, new_d_a))
+        return self.updates
+
+    def get_config(self):
+        config = {'lr': float(K.get_value(self.lr)),
+                  'rho': self.rho,
+                  'decay': float(K.get_value(self.decay)),
+                  'epsilon': self.epsilon,
+                  'beta_1': self.beta_1}
+        base_config = super(Adadelta_Adam, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+class Adadelta_momentum(Optimizer):
+    """adadelta optimizer.
+
+    it is recommended to leave the parameters of this optimizer
+    at their default values.
+
+    # Arguments
+        lr: float >= 0. Learning rate.
+            It is recommended to leave it at the default value.
+        rho: float >= 0.
+        epsilon: float >= 0. Fuzz factor.
+        decay: float >= 0. Learning rate decay over each update.
+
+    # References
+        - [Adadelta - an adaptive learning rate method](http://arxiv.org/abs/1212.5701)
+    """
+
+    def __init__(self, lr=1.0, rho=0.95, epsilon=1e-8, decay=0., momentum=0.,
+                 **kwargs):
+        super(Adadelta_momentum, self).__init__(**kwargs)
+        self.lr = K.variable(lr, name='lr')
+        self.rho = rho
+        self.epsilon = epsilon
+        self.decay = K.variable(decay, name='decay')
+        self.initial_decay = decay
+        self.momentum = momentum
+        self.iterations = K.variable(0., name='iterations')
+
+    def get_updates(self, params, constraints, loss):
+        grads = self.get_gradients(loss, params)
+        shapes = [K.get_variable_shape(p) for p in params]
+        accumulators = [K.zeros(shape) for shape in shapes]
+        delta_accumulators = [K.zeros(shape) for shape in shapes]
+        moments = [K.zeros(shape) for shape in shapes]
+        self.weights = accumulators + delta_accumulators + moments
+        self.updates = []
+
+        lr = self.lr
+        if self.initial_decay > 0:
+            lr *= (1. / (1. + self.decay * self.iterations))
+            self.updates.append(K.update_add(self.iterations, 1))
+
+        for p, g, a, d_a, m in zip(params, grads, accumulators, delta_accumulators, moments):
+            # update accumulator
+            new_a = self.rho * a + (1. - self.rho) * K.square(g)
+            self.updates.append(K.update(a, new_a))
+
+            # use the new accumulator and the *old* delta_accumulator
+            v = self.momentum * m - lr * g * K.sqrt(d_a + self.epsilon) / K.sqrt(new_a + self.epsilon)
+            update = v
+            self.updates.append(K.update(m, v))
+            new_p = p + v
+
+            # apply constraints
+            if p in constraints:
+                c = constraints[p]
+                new_p = c(new_p)
+            self.updates.append(K.update(p, new_p))
+
+            # update delta_accumulator
+            new_d_a = self.rho * d_a + (1 - self.rho) * K.square(update)
+            self.updates.append(K.update(d_a, new_d_a))
+        return self.updates
+
+    def get_config(self):
+        config = {'lr': float(K.get_value(self.lr)),
+                  'rho': self.rho,
+                  'decay': float(K.get_value(self.decay)),
+                  'epsilon': self.epsilon,
+                  'self.momentum': self.momentum}
+        base_config = super(Adadelta_momentum, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
 
@@ -351,9 +614,9 @@ class Adagrad(Optimizer):
 
 
 class Adadelta(Optimizer):
-    """Adadelta optimizer.
+    """adadelta optimizer.
 
-    It is recommended to leave the parameters of this optimizer
+    it is recommended to leave the parameters of this optimizer
     at their default values.
 
     # Arguments
@@ -684,6 +947,10 @@ adadelta = Adadelta
 adam = Adam
 adamax = Adamax
 nadam = Nadam
+bb = BB
+bb_mom = BB_momentum
+aa = Adadelta_Adam
+adadelta_mom = Adadelta_momentum
 
 
 def serialize(optimizer):
@@ -712,6 +979,10 @@ def deserialize(config, custom_objects=None):
         'adamax': Adamax,
         'nadam': Nadam,
         'tfoptimizer': TFOptimizer,
+        'bb': BB,
+        'bb_mom': BB_momentum,
+        'aa': Adadelta_Adam,
+        'adadelta_mom': Adadelta_momentum
     }
     # Make deserialization case-insensitive for built-in optimizers.
     if config['class_name'].lower() in all_classes:
