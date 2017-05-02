@@ -26,11 +26,11 @@ class Config(object):
     def __init__(self, save_dir=None):
         self.input_dim  = 784
         self.output_dim = 10
-        self.max_epochs = 1
+        self.max_epochs = 10
         self.batch_size = 128
         self.learning_rate = 1e-1
-        self.momentum = 0.9
-        self.optimizer = 'adam'
+        self.momentum = 0.0
+        self.optimizer = 'sgd'
         self.base_lr = 1.0
         self.per_param = True
         self.use_abs = False
@@ -71,6 +71,8 @@ def compile_model(model, cfg):
     elif cfg.optimizer=='bb_mom':
         opt = BB_momentum(base_lr=cfg.base_lr, per_param=cfg.per_param, use_abs=cfg.use_abs, 
                           lbound=cfg.lbound, ubound=cfg.ubound, rho=cfg.rho)
+    elif cfg.optimizer=='adadelta':
+        opt = 'adadelta'
     elif cfg.optimizer=='adadelta_mom':
         opt = Adadelta_momentum(momentum=cfg.momentum)
     print 'Using Optimizer: {}'.format(cfg.optimizer)
@@ -142,7 +144,7 @@ def validate(model, dataset):
     return val_loss, val_acc
              
 
-def save_loss(losses, save_dir, fname, first_use='False'):
+def save_loss(losses, save_dir, fname, first_use=False):
     if first_use:
         f = open(os.path.join(save_dir, fname), 'w')
     else:
@@ -166,7 +168,7 @@ def plot_loss(losses, save_dir, plotname, title=''):
 
 if __name__=="__main__":
     ## gpu_run?
-    final_run = False
+    final_run = True
 
     ## create unique run_id and related directory
     while True:
