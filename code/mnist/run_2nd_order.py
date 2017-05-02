@@ -6,6 +6,7 @@ import time
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import math
 
 import theano
 import theano.tensor as T
@@ -26,7 +27,7 @@ class Config(object):
     def __init__(self, save_dir=None):
         self.input_dim  = 784
         self.output_dim = 10
-        self.max_epochs = 100
+        self.max_epochs = 10
         self.batch_size = 128
         self.learning_rate = 1e-1
         self.momentum = 0.0
@@ -49,9 +50,9 @@ class Config(object):
 def create_feedforward_classifier_model(cfg=Config()):
     input_images = Input(shape=(cfg.input_dim,), name='input_images')
     h1 = Dense(1000,activation='relu',name='h1')(input_images)
-    #h1 = Dropout(0.5,name='d1')(h1) ####
+    h1 = Dropout(0.5,name='d1')(h1) ####
     h2 = Dense(1000,activation='relu',name='h2')(h1)
-    #h2 = Dropout(0.5,name='d2')(h2) ####
+    h2 = Dropout(0.5,name='d2')(h2) ####
     #output = Dense(cfg.output_dim,activation='softmax',name='softmax')(h2)
     pre_final = Dense(cfg.output_dim,activation='linear',name='pre_final')(h2)
     output = Activation('softmax',name='softmax')(pre_final)
@@ -99,6 +100,7 @@ def train(model, dataset, cfg):
     val_acc = []
     save_loss(train_loss, save_dir, 'training_cost.txt', first_use=True)
     save_loss(val_loss, save_dir, 'validation_cost.txt', first_use=True)
+    save_loss([], save_dir, 'max_learning_rates.txt', first_use=True)
     save_loss([], save_dir, 'learning_rates.txt', first_use=True)
     
     ##################
@@ -132,6 +134,8 @@ def train(model, dataset, cfg):
                                                      y = batch_labels,
                                                      batch_size = cfg.batch_size,
                                                      verbose = 0)   
+            train_loss_batch.append(fx)
+            train_acc_batch.append(train_acc)
             ## get f(x+alpaha*g)
             set_weights(model, computed_gradients, alpha)
             fx_plus_ag, _ = model.evaluate(x = dataset.data['train_images'][batch_inds,:],
@@ -147,11 +151,10 @@ def train(model, dataset, cfg):
                                                      verbose = 0)
             ## chosen learning rate
             gT_H_g = (fx_plus_ag + fx_minus_ag - 2*fx)/(alpha**2)
-            lr = 2*gT_g / np.abs(gT_H_g)
+            max_lr = 2*gT_g / np.abs(gT_H_g)
+            lr     = min(fx/gT_g, max_lr)
+            save_loss([max_lr], save_dir, 'max_learning_rates.txt')
             save_loss([lr], save_dir, 'learning_rates.txt')
-
-            ## final update
-            set_weights(model, computed_gradients, alpha-lr) # lr has to be -ve
             
             ## print 
             print 'alpha             : ', alpha
@@ -161,44 +164,21 @@ def train(model, dataset, cfg):
             print 'f(x+)+f(x-)-2f(x) : ', fx_plus_ag + fx_minus_ag - 2*fx
             print 'estimated (g.T)Hg : ', gT_H_g
             print 'gT_g              : ', gT_g
+            print 'max_lr            : ', max_lr
             print 'chosen lr         : ', lr
+            print 'epoch-batch: {:3d}-{:3d}  train_loss: {:.3f}  train_acc:{:.3f}'.format(epoch+1,batch_num+1,
+                                                                                          train_loss_batch[-1],train_acc_batch[-1])
+
+            ## quit?
+            if gT_H_g==0.0:
+                break
+
+            ## final update
+            set_weights(model, computed_gradients, alpha-lr) # lr has to be -ve
 
             ## update alpha
             alpha = min(lr/2, 1e-1)
             
-            #print computed_gradients[-1]
-            #print [x.name for x in model.trainable_weights]
-            #if batch_num==0:
-            #    exit()
-            ##################
-
-            #history = model.fit(x = dataset.data['train_images'][batch_inds,:], 
-            #                    y = batch_labels, 
-            #                    batch_size = cfg.batch_size,
-            #                    epochs = 1,
-            #                    verbose = 0)
-            #train_loss_batch.append(history.history['loss'][0])
-            #train_acc_batch.append(history.history['acc'][0])
-            train_loss_batch.append(fx)
-            train_acc_batch.append(train_acc)
-            #print '='*100
-            print 'Epoch-Batch: {:3d}-{:3d}  train_loss: {:.3f}  train_acc:{:.3f}'.format(epoch+1,batch_num+1,
-                                                                                          train_loss_batch[-1],train_acc_batch[-1])
-            #lrs = model.optimizer.get_weights()[2*6:3*6]
-            #gcurr = model.optimizer.get_weights()[3*6:4*6]
-
-            #shapes = [x.shape for x in model.optimizer.get_weights()[:6]]
-            #print 'lrs          :', [np.sum(np.abs(x)) for x in lrs]
-            #print 'len(model.optimizer.get_weights()): ', len(model.optimizer.get_weights())
-            #print 'model.weights: ', [np.sum(np.abs(x.eval())) for x in model.weights]
-            #print 'gcurr        : ', [np.sum(np.abs(x)) for x in gcurr]
-            # with a Sequential model
-            #print np.sum(layer_n_output, axis=0)
-            #print np.shape(np.sum(layer_n_output, axis=0))
-            #print np.count_nonzero(np.sum(layer_n_output, axis=0))
-            #print sorted(model.trainable_weights, key=lambda x: x.name if x.name else x.auto_name)
-            #print ''
-            #print ''
         train_loss.append(np.mean(train_loss_batch[-tot_batches:]))
         save_loss(train_loss[-1:], save_dir, 'training_cost.txt')
         print 'epoch {} - average training cost: {:.3f}'.format(epoch+1, train_loss[-1])
@@ -207,6 +187,8 @@ def train(model, dataset, cfg):
         #val_loss.append(vl)
         #val_acc.append(va)
         #save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
+        if math.isnan(train_loss[-1]):
+            exit()
     return train_loss_batch, train_acc_batch, train_loss, val_loss, val_acc
 
 
@@ -245,7 +227,7 @@ def plot_loss(losses, save_dir, plotname, title=''):
 
 if __name__=="__main__":
     ## gpu_run?
-    final_run = False
+    final_run = True
 
     ## create unique run_id and related directory
     while True:
