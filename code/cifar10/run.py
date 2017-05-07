@@ -12,7 +12,7 @@ import theano.tensor as T
 from theano.gof import Variable as V
 import keras
 from keras import backend as K
-from keras.layers import Input, Dense, Activation, Dropout
+from keras.layers import Input, Dense, Activation, Dropout, Conv2D, MaxPooling2D, Flatten
 from keras.models import Model
 from keras import optimizers
 from keras.optimizers import SGD, BB, BB_momentum, Adam, Adadelta_momentum
@@ -24,12 +24,14 @@ DTYPE = 'float32'
 
 class Config(object):
     def __init__(self, save_dir=None):
-        self.input_dim  = 784
+        self.input_height    = 32
+        self.input_width     = 32
+        self.input_nchannels = 3
         self.output_dim = 10
         self.max_epochs = 10
         self.batch_size = 128
         self.learning_rate = 1e-1
-        self.momentum = 0.0
+        self.momentum = 0.9
         self.optimizer = 'sgd'
         self.base_lr = 1.0
         self.per_param = True
@@ -46,24 +48,43 @@ class Config(object):
             pickle.dump(self.__dict__, f, 2)
 
 
-def create_feedforward_classifier_model(cfg=Config()):
-    input_images = Input(shape=(cfg.input_dim,), name='input_images')
-    h1 = Dense(1000,activation='relu',name='h1')(input_images)
-    h1 = Dropout(0.5,name='d1')(h1) ####
-    h2 = Dense(1000,activation='relu',name='h2')(h1)
-    h2 = Dropout(0.5,name='d2')(h2) ####
-    #output = Dense(cfg.output_dim,activation='softmax',name='softmax')(h2)
-    pre_final = Dense(cfg.output_dim,activation='linear',name='pre_final')(h2)
-    output = Activation('softmax',name='softmax')(pre_final)
+#def create_feedforward_classifier_model(cfg=Config()):
+#    input_images = Input(shape=(cfg.input_dim,), name='input_images')
+#    h1 = Dense(1000,activation='relu',name='h1')(input_images)
+#    h1 = Dropout(0.5,name='d1')(h1) ####
+#    h2 = Dense(1000,activation='relu',name='h2')(h1)
+#    h2 = Dropout(0.5,name='d2')(h2) ####
+#    #output = Dense(cfg.output_dim,activation='softmax',name='softmax')(h2)
+#    pre_final = Dense(cfg.output_dim,activation='linear',name='pre_final')(h2)
+#    output = Activation('softmax',name='softmax')(pre_final)
+#    model = Model(input=input_images,output=output)
+#    return model
+    
+
+def create_convnet_classifier_model(cfg=Config()):
+    input_images = Input(shape=(cfg.input_height,cfg.input_width,cfg.input_nchannels), name='input_images')
+    conv1  = Conv2D(64,(5,5),strides=(1,1),padding='same',activation='relu',use_bias=True,name='conv1')(input_images)
+    pool1  = MaxPooling2D(pool_size=(3,3),strides=(2,2), padding='same',name='pool1')(conv1)
+    conv2  = Conv2D(64,(5,5),strides=(1,1),padding='same',activation='relu',use_bias=True,name='conv2')(pool1)
+    pool2  = MaxPooling2D(pool_size=(3,3),strides=(2,2), padding='same',name='pool2')(conv2)
+    conv3  = Conv2D(128,(5,5),strides=(1,1),padding='same',activation='relu',use_bias=True,name='conv3')(pool2)
+    pool3  = MaxPooling2D(pool_size=(3,3),strides=(2,2), padding='same',name='pool3')(conv3)
+    flat   = Flatten()(pool3)
+
+    fc4    = Dense(1000,activation='relu',name='fc4')(flat)
+    fc5    = Dense(cfg.output_dim,activation='linear',name='fc5')(fc4)
+    output = Activation('softmax',name='softmax')(fc5)
     model = Model(input=input_images,output=output)
     return model
-    
+
 
 def compile_model(model, cfg):
     if cfg.optimizer=='sgd':
         opt = SGD(lr=cfg.learning_rate, momentum=cfg.momentum)
     elif cfg.optimizer=='bb':
         opt = BB(base_lr=cfg.base_lr, per_param=cfg.per_param, use_abs=cfg.use_abs, lbound=cfg.lbound, ubound=cfg.ubound)
+    elif cfg.optimizer=='rmsprop':
+        opt = 'rmsprop'
     elif cfg.optimizer=='adam':
         opt = 'adam'
     elif cfg.optimizer=='aa':
@@ -177,29 +198,32 @@ if __name__=="__main__":
         if not os.path.exists(save_dir):
             break
     #run_id = run_id
-    #save_dir = '/atlas/u/kalpit/Second-Order/code/mnist/output'
+    #save_dir = os.path.join(os.getcwd(), 'output')
     os.system('rm -rf '+save_dir)
     os.makedirs(save_dir)
    
     ## redirect stdout
     if final_run:
         sys.stdout = open(os.path.join(save_dir, 'stdout'), 'w')
-    print run_id
+    print 'run_id: ', run_id
     print 'testing'
-
-    ## Data
-    data_dir = '/scail/data/group/atlas/kalpit/data/cifar10'
-    dataset = Dataset(data_dir)
 
     ## Config
     cfg = Config(save_dir)
     
     ## Model
-    model = create_feedforward_classifier_model()
+    print 'Creating Model...'
+    model = create_convnet_classifier_model()
     model.summary()
     compile_model(model, cfg)
 
+    ## Data
+    print 'Reading Data...'
+    data_dir = '/scail/data/group/atlas/kalpit/data/cifar10'
+    dataset = Dataset(data_dir)
+
     ## Train
+    print 'Training Model...'
     starttime = time.time()
     train_loss_batch, train_acc_batch, train_loss, val_loss, val_acc = train(model, dataset, cfg)
     endtime = time.time()
