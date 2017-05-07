@@ -1,6 +1,5 @@
 import os
 import numpy as np
-import pickle
 
 class Dataset(object):
     def __init__(self, data_dir):
@@ -33,7 +32,7 @@ class Dataset(object):
         Ytr = np.concatenate(ys)
         del X, Y
         Xte, Yte = self.load_CIFAR_batch(os.path.join(ROOT, 'test_batch'))
-        return Xtr, Ytr, Xte, Yte
+      return Xtr, Ytr, Xte, Yte
 
     def get_data(self):
         """
@@ -46,15 +45,15 @@ class Dataset(object):
         data['test_labels'] - 1d list. data['test_labels'][i] refers to label of test image number i.
         """
 
-        data = {}
         Xtr, Ytr, Xte, Yte = self.load_CIFAR10(self.data_dir)
+        data = {}
 
         ### training
-        data['train_images'] = Xtr
+        data['train_images'] = Xtr 
         data['train_labels'] = Ytr
         ### validation
         data['val_images'] = Xte
-        data['val_labels'] = Yte 
+        data['val_labels'] = Yte
         #### testing
         #data['test_images'] = np.load(os.path.join(self.data_dir, 'testing', 'images.npy'))
         #data['test_labels'] = np.load(os.path.join(self.data_dir, 'testing', 'labels.npy'))
