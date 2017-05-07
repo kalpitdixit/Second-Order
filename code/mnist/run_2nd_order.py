@@ -1,5 +1,7 @@
 import sys
 import os
+#save_dir = '/atlas/u/kalpit/Second-Order/code/mnist'
+#sys.stdout = open(os.path.join(save_dir, 'stdout'), 'w')
 import numpy as np
 import pickle
 import time
@@ -227,12 +229,12 @@ def plot_loss(losses, save_dir, plotname, title=''):
 
 if __name__=="__main__":
     ## gpu_run?
-    final_run = True
+    final_run = False
 
     ## create unique run_id and related directory
     while True:
         run_id = np.random.randint(low=1000000000, high=9999999999) # 10 digits
-        save_dir = '/atlas/u/kalpit/Second-Order/code/mnist/output_' + str(run_id)
+        save_dir = os.path.join(os.getcwd(), 'output_'+str(run_id))
         if not os.path.exists(save_dir):
             break
     #run_id = run_id
@@ -248,7 +250,7 @@ if __name__=="__main__":
     print 'testing'
 
     ## Data
-    data_dir = '/atlas/u/kalpit/data'
+    data_dir = '/scail/data/group/atlas/kalpit/data/mnist'
     dataset = Dataset(data_dir)
 
     ## Config
