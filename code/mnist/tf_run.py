@@ -10,16 +10,6 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import tensorflow.contrib.layers as layers
 
-"""
-import keras
-from keras import backend as K
-from keras.layers import Input, Dense, Activation, Dropout
-from keras.models import Model
-from keras import optimizers
-from keras.optimizers import SGD, Adam
-from keras.backend import categorical_crossentropy
-"""
-
 from data_handler import Dataset
 
 DTYPE = 'float32'
@@ -125,42 +115,15 @@ def train(model, dataset, cfg):
         tot_batches = int(np.ceil(1.0*dataset.n_train/cfg.batch_size))
         for batch_num in range(tot_batches):
             batch_inds = inds[batch_num*cfg.batch_size:min((batch_num+1)*cfg.batch_size,dataset.n_train)]
-            #batch_labels = np.zeros((len(batch_inds), cfg.output_dim)).astype(DTYPE)
-            #batch_labels[range(len(batch_inds)),dataset.data['train_labels'][batch_inds]] = 1
             feed_dict = {model.input_images: dataset.data['train_images'][batch_inds,:],
                          model.labels: dataset.data['train_labels'][batch_inds]
                          #model.lr: cfg.learning_rate
                         }
             loss, acc, _ = model.sess.run([model.loss, model.accuracy, model.train_op], feed_dict=feed_dict)
-            #loss, _ = model.sess.run([model.loss, model.train_op], feed_dict=feed_dict)
-            #history = model.fit(x = dataset.data['train_images'][batch_inds,:], 
-            #                    y = batch_labels, 
-            #                    batch_size = cfg.batch_size,
-            #                    epochs = 1,
-            #                    verbose = 0)
-            #train_loss_batch.append(history.history['loss'][0])
-            #train_acc_batch.append(history.history['acc'][0])
             train_loss_batch.append(loss)
-            #train_acc_batch.append(loss)
             train_acc_batch.append(acc)
-            #print '='*100
             print 'Epoch-Batch: {:3d}-{:3d}  train_loss: {:.3f}  train_acc:{:.3f}'.format(epoch+1,batch_num+1,
                                                                                           train_loss_batch[-1],train_acc_batch[-1])
-            #lrs = model.optimizer.get_weights()[2*6:3*6]
-            #gcurr = model.optimizer.get_weights()[3*6:4*6]
-
-            #shapes = [x.shape for x in model.optimizer.get_weights()[:6]]
-            #print 'lrs          :', [np.sum(np.abs(x)) for x in lrs]
-            #print 'len(model.optimizer.get_weights()): ', len(model.optimizer.get_weights())
-            #print 'model.weights: ', [np.sum(np.abs(x.eval())) for x in model.weights]
-            #print 'gcurr        : ', [np.sum(np.abs(x)) for x in gcurr]
-            # with a Sequential model
-            #print np.sum(layer_n_output, axis=0)
-            #print np.shape(np.sum(layer_n_output, axis=0))
-            #print np.count_nonzero(np.sum(layer_n_output, axis=0))
-            #print sorted(model.trainable_weights, key=lambda x: x.name if x.name else x.auto_name)
-            #print ''
-            #print ''
         train_loss.append(np.mean(train_loss_batch[-tot_batches:]))
         save_loss(train_loss[-1:], save_dir, 'training_cost.txt')
         print 'Epoch {} - Average Training Cost: {:.3f}'.format(epoch+1, train_loss[-1])
@@ -172,12 +135,10 @@ def train(model, dataset, cfg):
 
 
 def validate(model, dataset):
-    val_labels = np.zeros((dataset.n_val,cfg.output_dim))
-    val_labels[range(dataset.n_val),dataset.data['val_labels']] = 1
-    val_loss, val_acc = model.evaluate(x = dataset.data['val_images'],
-                                       y = val_labels,
-                                       batch_size = cfg.batch_size,
-                                       verbose = 0)
+    feed_dict = {model.input_images: dataset.data['val_images'],
+                 model.labels: dataset.data['val_labels']
+                }
+    val_loss, val_acc = model.sess.run([model.loss, model.accuracy], feed_dict=feed_dict)
     print 'validation_loss: {:.3f}  validation_acc: {:.3f}\n'.format(val_loss,val_acc)
     return val_loss, val_acc
              
@@ -246,8 +207,9 @@ if __name__=="__main__":
     plot_loss(val_loss, save_dir, 'validation_cost', 'validation_cost')
 
     ## Validate
+    print ''
+    print 'Final Validation...'
     validate(model, dataset)
     
     ## Training Time
     print 'Training Time: {:.2f}'.format(endtime - starttime)
-    print 'theano.config.device: ', theano.config.device
