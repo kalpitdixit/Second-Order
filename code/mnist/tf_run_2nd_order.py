@@ -135,6 +135,8 @@ def train(model, dataset, cfg):
         inds = range(dataset.n_train)
         np.random.shuffle(inds)
         tot_batches = int(np.ceil(1.0*dataset.n_train/cfg.batch_size))
+        max_lr_epoch = []
+        lr_epoch = []
         for batch_num in range(tot_batches):
             batch_inds = inds[batch_num*cfg.batch_size:min((batch_num+1)*cfg.batch_size,dataset.n_train)]
             ## get f(x) and gradients
@@ -178,7 +180,8 @@ def train(model, dataset, cfg):
             gT_H_g = (fx_plus_ag + fx_minus_ag - 2*fx)/(alpha**2)
             max_lr = 2*gT_g/np.abs(gT_H_g)
             lr = min(fx/gT_g, max_lr)
-            
+            max_lr_epoch.append(max_lr)
+            lr_epoch.append(lr)
             """
             ## 2nd order magic
             if gT_H_g <= 0.0:
@@ -204,31 +207,6 @@ def train(model, dataset, cfg):
                 print 'lr                : ', lr
             print 'Epoch-Batch: {:3d}-{:3d}  train_loss: {:.3f}  train_acc:{:.3f}'.format(epoch+1,batch_num+1,
                                                                                           train_loss_batch[-1],train_acc_batch[-1])
-            ###########
-            if gT_H_g < 0.0:
-                print '\nwhoa..........'
-                research_fd[model.lr] = -alpha
-                model.sess.run(model.change_weights_op, feed_dict=research_fd)
-                alpha = alpha / 100
-                print 'new_alpha: ', alpha
-                for i in range(10):
-                    loss, acc, grads = model.sess.run([model.loss, model.accuracy, model.grads], feed_dict=fd)
-                    fx = loss
-                    ## get f(x+alpha*g)
-                    research_fd[model.lr] = -alpha
-                    model.sess.run(model.change_weights_op, feed_dict=research_fd)
-                    fx_plus_ag = model.sess.run(model.loss, feed_dict=fd)
-                    ## get f(x-alpha*g)
-                    research_fd[model.lr] = 2*alpha
-                    model.sess.run(model.change_weights_op, feed_dict=research_fd)
-                    fx_minus_ag = model.sess.run(model.loss, feed_dict=fd)
-                    print fx, fx_plus_ag, fx_minus_ag, fx_plus_ag + fx_minus_ag - 2*fx
-                    ## get back to x
-                    research_fd[model.lr] = -alpha
-                    model.sess.run(model.change_weights_op, feed_dict=research_fd)
-                exit()
-            ###########
-
 
             ## quit?
             if gT_H_g==0.0:
@@ -241,11 +219,11 @@ def train(model, dataset, cfg):
 
             ## update alpha
             alpha = min(lr/2, 1e-1)
-            save_loss([max_lr], save_dir, 'max_learning_rates.txt')
-            save_loss([lr], save_dir, 'learning_rates.txt')
 
 
         train_loss.append(np.mean(train_loss_batch[-tot_batches:]))
+        save_loss(max_lr_epoch, save_dir, 'max_learning_rates.txt')
+        save_loss(lr_epoch, save_dir, 'learning_rates.txt')
         save_loss(train_loss[-1:], save_dir, 'training_cost.txt')
         print 'Epoch {} - Average Training Cost: {:.3f}'.format(epoch+1, train_loss[-1])
         #vl, va = validate(model, dataset)
@@ -291,7 +269,7 @@ if __name__=="__main__":
     tf.set_random_seed(0)
 
     ## gpu_run?
-    final_run = False
+    final_run = True
 
     ## create unique run_id and related directory
     while True:
