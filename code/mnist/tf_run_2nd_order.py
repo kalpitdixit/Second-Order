@@ -9,8 +9,10 @@ import matplotlib.pyplot as plt
 
 import tensorflow as tf
 import tensorflow.contrib.layers as layers
+from tensorflow.python.ops import math_ops
 
 from data_handler import Dataset
+from dropout import dropout
 
 DTYPE = 'float32'
 
@@ -18,17 +20,15 @@ class Config(object):
     def __init__(self, save_dir=None):
         self.input_dim  = 784
         self.output_dim = 10
-        self.max_epochs = 1
+        self.h1_dim     = 1000
+        self.h2_dim     = 1000
+        self.keep_prob  = 0.5
+
+        self.max_epochs = 100
         self.batch_size = 128
         self.learning_rate = 1e-1
         self.momentum = 0.0
         self.optimizer = 'sgd'
-        self.base_lr = 1.0
-        self.per_param = True
-        self.use_abs = False
-        self.lbound = 0 # -1e100
-        self.ubound = 1e0 #1e100
-        self.rho = 0.95
         if save_dir is not None:
             self.save(save_dir)
 
@@ -63,15 +63,27 @@ class Model(object):
         """
         ## input placeholders
         self.input_images = tf.placeholder(tf.float32, shape=(None,self.cfg.input_dim), name='input_images')
-        self.labels = tf.placeholder(tf.int32, shape=(None,), name='labels')
-        self.lr = tf.placeholder(tf.float32, shape=(), name='lr')
+        self.labels       = tf.placeholder(tf.int32,   shape=(None,), name='labels')
+        self.lr           = tf.placeholder(tf.float32, shape=(), name='lr')
+        self.use_past_bt  = tf.placeholder(tf.bool,    shape=(), name='use_past_bt') # to pass previous dropout mask
+        self.h1_past_bt   = tf.placeholder(tf.float32, shape=(None, cfg.h1_dim), name='h1_past_bt')
+        self.h2_past_bt   = tf.placeholder(tf.float32, shape=(None, cfg.h2_dim), name='h2_past_bt')
 
         ## forward pass, note how this is pre-softmax
-        h1 = layers.fully_connected(self.input_images, num_outputs=1000, activation_fn=tf.nn.relu, scope='h1')
-        h1 = tf.nn.dropout(h1, keep_prob=0.5)
-        h2 = layers.fully_connected(h1, num_outputs=1000, activation_fn=tf.nn.relu, scope='h2')
-        h2 = tf.nn.dropout(h2, keep_prob=0.5)
-        self.preds = layers.fully_connected(h2, num_outputs=self.cfg.output_dim, activation_fn=None, scope='preds')
+        h1 = layers.fully_connected(self.input_images, num_outputs=cfg.h1_dim, activation_fn=tf.nn.relu, 
+                                    biases_initializer=layers.initializers.xavier_initializer(), scope='h1')
+        h1, self.h1_binary_tensor = tf.cond(self.use_past_bt, lambda: [math_ops.div(h1,cfg.keep_prob)*self.h1_past_bt, self.h1_past_bt], 
+                                            lambda: dropout(h1, keep_prob=cfg.keep_prob))
+        #h1, self.h1_binary_tensor = dropout(h1, keep_prob=cfg.keep_prob)
+        #h1 = tf.nn.dropout(h1, keep_prob=cfg.keep_prob)
+        h2 = layers.fully_connected(h1, num_outputs=cfg.h2_dim, activation_fn=tf.nn.relu,
+                                    biases_initializer=layers.initializers.xavier_initializer(), scope='h2')
+        h2, self.h2_binary_tensor = tf.cond(self.use_past_bt, lambda: [math_ops.div(h2,cfg.keep_prob)*self.h2_past_bt, self.h2_past_bt], 
+                                            lambda: dropout(h2, keep_prob=cfg.keep_prob))
+        #h2, self.h2_binary_tensor = dropout(h2, keep_prob=cfg.keep_prob)
+        #h2 = tf.nn.dropout(h2, keep_prob=cfg.keep_prob)
+        self.preds = layers.fully_connected(h2, num_outputs=self.cfg.output_dim, activation_fn=None,
+                                            biases_initializer=layers.initializers.xavier_initializer(), scope='preds')
 
         ## loss and accuracy
         loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.preds, labels=self.labels)
@@ -90,12 +102,12 @@ class Model(object):
         #main_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
         #print main_vars
         #print [x.get_shape() for x in grads]
-        self.h1_W_grad = tf.placeholder(tf.float32, shape=(784,1000), name='h1_W_grad')
-        self.h1_b_grad = tf.placeholder(tf.float32, shape=(1000), name='h1_b_grad')
-        self.h2_W_grad = tf.placeholder(tf.float32, shape=(1000,1000), name='h2_W_grad')
-        self.h2_b_grad = tf.placeholder(tf.float32, shape=(1000), name='h2_b_grad')
-        self.preds_W_grad = tf.placeholder(tf.float32, shape=(1000,10), name='preds_W_grad')
-        self.preds_b_grad = tf.placeholder(tf.float32, shape=(10), name='preds_b_grad')
+        self.h1_W_grad = tf.placeholder(tf.float32, shape=(cfg.input_dim,cfg.h1_dim), name='h1_W_grad')
+        self.h1_b_grad = tf.placeholder(tf.float32, shape=(cfg.h1_dim), name='h1_b_grad')
+        self.h2_W_grad = tf.placeholder(tf.float32, shape=(cfg.h1_dim,cfg.h2_dim), name='h2_W_grad')
+        self.h2_b_grad = tf.placeholder(tf.float32, shape=(cfg.h2_dim), name='h2_b_grad')
+        self.preds_W_grad = tf.placeholder(tf.float32, shape=(cfg.h2_dim,cfg.output_dim), name='preds_W_grad')
+        self.preds_b_grad = tf.placeholder(tf.float32, shape=(cfg.output_dim), name='preds_b_grad')
         passed_grads = [self.h1_W_grad, self.h1_b_grad, 
                         self.h2_W_grad, self.h2_b_grad,
                         self.preds_W_grad, self.preds_b_grad]
@@ -116,6 +128,8 @@ def train(model, dataset, cfg):
     val_acc = []
     save_loss(train_loss, save_dir, 'training_cost.txt', first_use=True)
     save_loss(val_loss, save_dir, 'validation_cost.txt', first_use=True)
+    save_loss([], save_dir, 'max_learning_rates.txt', first_use=True)
+    save_loss([], save_dir, 'learning_rates.txt', first_use=True)
     alpha = 1e-2
     for epoch in range(cfg.max_epochs):
         inds = range(dataset.n_train)
@@ -125,10 +139,14 @@ def train(model, dataset, cfg):
             batch_inds = inds[batch_num*cfg.batch_size:min((batch_num+1)*cfg.batch_size,dataset.n_train)]
             ## get f(x) and gradients
             fd = {model.input_images: dataset.data['train_images'][batch_inds,:],
-                  model.labels: dataset.data['train_labels'][batch_inds]
-                  #model.lr: cfg.learning_rate
+                  model.labels: dataset.data['train_labels'][batch_inds],
+                  model.use_past_bt: False,
+                  model.h1_past_bt: np.zeros((len(batch_inds),model.cfg.h1_dim)),
+                  model.h2_past_bt: np.zeros((len(batch_inds),model.cfg.h2_dim))
                  }
-            loss, acc, grads = model.sess.run([model.loss, model.accuracy, model.grads], feed_dict=fd)
+            loss, acc, grads, h1_bt, h2_bt = model.sess.run([model.loss, model.accuracy, model.grads, 
+                                                             model.h1_binary_tensor, model.h2_binary_tensor], 
+                                                            feed_dict=fd)
             fx = loss
             train_loss_batch.append(loss)
             train_acc_batch.append(acc)
@@ -137,6 +155,14 @@ def train(model, dataset, cfg):
                            model.preds_W_grad: grads[4], model.preds_b_grad: grads[5],
                           }
             gT_g = np.sum([np.sum(np.square(g)) for g in grads])
+
+            ## set fd to use old binary tensors
+            fd = {model.input_images: dataset.data['train_images'][batch_inds,:],
+                  model.labels: dataset.data['train_labels'][batch_inds],
+                  model.use_past_bt: True,
+                  model.h1_past_bt: h1_bt,
+                  model.h2_past_bt: h2_bt
+                 }
 
             ## get f(x+alpha*g)
             research_fd[model.lr] = -alpha
@@ -152,7 +178,18 @@ def train(model, dataset, cfg):
             gT_H_g = (fx_plus_ag + fx_minus_ag - 2*fx)/(alpha**2)
             max_lr = 2*gT_g/np.abs(gT_H_g)
             lr = min(fx/gT_g, max_lr)
-
+            
+            """
+            ## 2nd order magic
+            if gT_H_g <= 0.0:
+                max_lr = lr = - (-gT_g + np.sqrt(gT_g**2-2*gT_H_g*fx)) / gT_H_g
+            else:
+                if gT_g**2-2*gT_H_g*fx >= 0:
+                    max_lr = lr = - (-gT_g + np.sqrt(gT_g**2-2*gT_H_g*fx)) / gT_H_g
+                else:
+                    max_lr = lr = - (-gT_g/gT_H_g)
+            """        
+            
             ## print
             if True:
                 print ''
@@ -167,6 +204,31 @@ def train(model, dataset, cfg):
                 print 'lr                : ', lr
             print 'Epoch-Batch: {:3d}-{:3d}  train_loss: {:.3f}  train_acc:{:.3f}'.format(epoch+1,batch_num+1,
                                                                                           train_loss_batch[-1],train_acc_batch[-1])
+            ###########
+            if gT_H_g < 0.0:
+                print '\nwhoa..........'
+                research_fd[model.lr] = -alpha
+                model.sess.run(model.change_weights_op, feed_dict=research_fd)
+                alpha = alpha / 100
+                print 'new_alpha: ', alpha
+                for i in range(10):
+                    loss, acc, grads = model.sess.run([model.loss, model.accuracy, model.grads], feed_dict=fd)
+                    fx = loss
+                    ## get f(x+alpha*g)
+                    research_fd[model.lr] = -alpha
+                    model.sess.run(model.change_weights_op, feed_dict=research_fd)
+                    fx_plus_ag = model.sess.run(model.loss, feed_dict=fd)
+                    ## get f(x-alpha*g)
+                    research_fd[model.lr] = 2*alpha
+                    model.sess.run(model.change_weights_op, feed_dict=research_fd)
+                    fx_minus_ag = model.sess.run(model.loss, feed_dict=fd)
+                    print fx, fx_plus_ag, fx_minus_ag, fx_plus_ag + fx_minus_ag - 2*fx
+                    ## get back to x
+                    research_fd[model.lr] = -alpha
+                    model.sess.run(model.change_weights_op, feed_dict=research_fd)
+                exit()
+            ###########
+
 
             ## quit?
             if gT_H_g==0.0:
@@ -179,6 +241,8 @@ def train(model, dataset, cfg):
 
             ## update alpha
             alpha = min(lr/2, 1e-1)
+            save_loss([max_lr], save_dir, 'max_learning_rates.txt')
+            save_loss([lr], save_dir, 'learning_rates.txt')
 
 
         train_loss.append(np.mean(train_loss_batch[-tot_batches:]))
@@ -223,6 +287,9 @@ def plot_loss(losses, save_dir, plotname, title=''):
 
 
 if __name__=="__main__":
+    np.random.seed(0)
+    tf.set_random_seed(0)
+
     ## gpu_run?
     final_run = False
 
