@@ -15,7 +15,7 @@ from keras import backend as K
 from keras.layers import Input, Dense, Activation, Dropout, Conv2D, MaxPooling2D, Flatten
 from keras.models import Model
 from keras import optimizers
-from keras.optimizers import SGD, BB, BB_momentum, Adam, Adadelta_momentum
+from keras.optimizers import SGD, Adam
 from keras.backend import categorical_crossentropy
 
 from data_handler import Dataset
@@ -32,7 +32,7 @@ class Config(object):
         self.batch_size = 128
         self.learning_rate = 1e-1
         self.momentum = 0.9
-        self.optimizer = 'sgd'
+        self.optimizer = 'adam'
         self.base_lr = 1.0
         self.per_param = True
         self.use_abs = False
@@ -46,6 +46,10 @@ class Config(object):
         fname = os.path.join(save_dir, 'config.pkl') 
         with open(fname, 'w') as f:
             pickle.dump(self.__dict__, f, 2)
+        fname = os.path.join(save_dir, 'config.txt')
+        with open(fname, 'w') as f:
+            for k in self.__dict__:
+                f.write(k+': '+str(self.__dict__[k])+'\n')
 
 
 #def create_feedforward_classifier_model(cfg=Config()):
@@ -127,8 +131,8 @@ def train(model, dataset, cfg):
             train_loss_batch.append(history.history['loss'][0])
             train_acc_batch.append(history.history['acc'][0])
             #print '='*100
-            print 'Epoch-Batch: {:3d}-{:3d}  train_loss: {:.3f}  train_acc:{:.3f}'.format(epoch+1,batch_num+1,
-                                                                                          train_loss_batch[-1],train_acc_batch[-1])
+            print 'Epoch-Batch: {:3d}-{:3d}  train_loss: {:.3f}  train_acc: {:.3f}'.format(epoch+1,batch_num+1,
+                                                                                           train_loss_batch[-1],train_acc_batch[-1])
             #lrs = model.optimizer.get_weights()[2*6:3*6]
             #gcurr = model.optimizer.get_weights()[3*6:4*6]
 

@@ -21,7 +21,9 @@ DTYPE = 'float32'
 
 class Config(object):
     def __init__(self, save_dir=None):
-        self.input_dim  = 784
+        self.input_height    = 32
+        self.input_width     = 32
+        self.input_nchannels = 3
         self.output_dim = 10
         self.h1_dim     = 1000
         self.h2_dim     = 1000
@@ -64,6 +66,7 @@ def train(model, dataset, cfg):
         max_lr_epoch = []
         lr_epoch = []
         est = time.time()
+        times = [[] for i in range(10)]
         for batch_num in range(tot_batches):
             bst = time.time()
             st = time.time()
@@ -72,22 +75,26 @@ def train(model, dataset, cfg):
             fd = {model.input_images: dataset.data['train_images'][batch_inds,:],
                   model.labels: dataset.data['train_labels'][batch_inds],
                   model.use_past_bt: False,
-                  model.h1_past_bt: np.zeros((len(batch_inds),model.cfg.h1_dim)),
-                  model.h2_past_bt: np.zeros((len(batch_inds),model.cfg.h2_dim))
-                 }
-            loss, acc, grads, h1_bt, h2_bt = model.sess.run([model.loss, model.accuracy, model.grads, 
-                                                             model.h1_binary_tensor, model.h2_binary_tensor], 
-                                                            feed_dict=fd)
+                  model.input_past_bt: np.zeros((len(batch_inds),model.cfg.input_height,model.cfg.input_width,model.cfg.input_nchannels)),
+                  model.fc4_past_bt: np.zeros((len(batch_inds),1000))
+                }
+            loss, acc, grads, input_bt, fc4_bt = model.sess.run([model.loss, model.accuracy, model.grads, 
+                                                                 model.input_binary_tensor, model.fc4_binary_tensor], 
+                                                                 feed_dict=fd)
             fx = loss
             train_loss_batch.append(loss)
             train_acc_batch.append(acc)
-            research_fd = {model.h1_W_grad: grads[0],    model.h1_b_grad: grads[1],
-                           model.h2_W_grad: grads[2],    model.h2_b_grad: grads[3],
-                           model.preds_W_grad: grads[4], model.preds_b_grad: grads[5],
+            research_fd = {model.conv1_W_grad: grads[0],    model.conv1_b_grad: grads[1],
+                           model.conv2_W_grad: grads[2],    model.conv2_b_grad: grads[3],
+                           model.conv3_W_grad: grads[4],    model.conv3_b_grad: grads[5],
+                           model.fc4_W_grad: grads[6],      model.fc4_b_grad: grads[7],
+                           model.fc5_W_grad: grads[8],      model.fc5_b_grad: grads[9],
                           }
+            times[0].append(time.time()-st)
             print 'fx and grads: ', time.time()-st
             st = time.time()
             gT_g = np.sum([np.sum(np.square(g)) for g in grads])
+            times[1].append(time.time()-st)
             print 'gT_g: ', time.time()-st
 
             ## set fd to use old binary tensors
@@ -95,42 +102,51 @@ def train(model, dataset, cfg):
             fd = {model.input_images: dataset.data['train_images'][batch_inds,:],
                   model.labels: dataset.data['train_labels'][batch_inds],
                   model.use_past_bt: True,
-                  model.h1_past_bt: h1_bt,
-                  model.h2_past_bt: h2_bt
-                 }
+                  model.input_past_bt: input_bt,
+                  model.fc4_past_bt: fc4_bt
+                }
+            times[2].append(time.time()-st)
             print 'change fd: ', time.time()-st
 
             ## get f(x+alpha*g)
             st = time.time()
             research_fd[model.lr] = -alpha
             model.sess.run(model.change_weights_op, feed_dict=research_fd)
+            times[3].append(time.time()-st)
+            print 'change_weights_op: ', time.time()-st
+            st = time.time()
             fx_plus_ag = model.sess.run(model.loss, feed_dict=fd)
+            times[4].append(time.time()-st)
             print 'fx+: ', time.time()-st
 
             ## get f(x-alpha*g)
             st = time.time()
             research_fd[model.lr] = 2*alpha
             model.sess.run(model.change_weights_op, feed_dict=research_fd)
+            times[5].append(time.time()-st)
+            print 'change_weights_op: ', time.time()-st
+            st = time.time()
             fx_minus_ag = model.sess.run(model.loss, feed_dict=fd)
+            times[6].append(time.time()-st)
             print 'fx-: ', time.time()-st
 
             ## choose learning rate
             st = time.time()
+            gT_H_g = (fx_plus_ag + fx_minus_ag - 2*fx)/(alpha**2)
             if not cfg.magic_2nd_order:
-                gT_H_g = (fx_plus_ag + fx_minus_ag - 2*fx)/(alpha**2)
                 max_lr = 2*gT_g/np.abs(gT_H_g)
                 lr = min(fx/gT_g, max_lr)
-                max_lr_epoch.append(max_lr)
-                lr_epoch.append(lr)
-            
             else: ## 2nd order magic
                 if gT_H_g <= 0.0:
-                    max_lr = lr = - (-gt_g + np.sqrt(gt_g**2-2*gt_h_g*fx)) / gt_h_g
+                    max_lr = lr = - (-gT_g + np.sqrt(gT_g**2-2*gT_H_g*fx)) / gT_H_g
                 else:
-                    if gt_g**2-2*gt_h_g*fx >= 0:
+                    if gT_g**2-2*gT_H_g*fx >= 0:
                         max_lr = lr = - (-gT_g + np.sqrt(gT_g**2-2*gT_H_g*fx)) / gT_H_g
                     else:
                         max_lr = lr = - (-gT_g/gT_H_g)
+            max_lr_epoch.append(max_lr)
+            lr_epoch.append(lr)
+            times[7].append(time.time()-st)
             print 'choose lr: ', time.time()-st
             
             ## print
@@ -148,6 +164,7 @@ def train(model, dataset, cfg):
                 print 'lr                : ', lr
             print 'Epoch-Batch: {:3d}-{:3d}  train_loss: {:.3f}  train_acc:{:.3f}'.format(epoch+1,batch_num+1,
                                                                                           train_loss_batch[-1],train_acc_batch[-1])
+            times[8].append(time.time()-st)
             print 'printing: ', time.time()-st
 
             ## quit?
@@ -163,11 +180,13 @@ def train(model, dataset, cfg):
             ## update alpha
             alpha = min(lr/2, 1e-1)
 
+            times[9].append(time.time()-st)
             print 'quit? final update, alpha: ', time.time()-st
             print 'batch_time: ', time.time()-bst
             print '_'*100
         print 'avg_batch_time: ', (time.time()-est)/tot_batches
-
+        for i in range(len(times)):
+            print 'i: ', i, '   ', np.mean(times[i])
         train_loss.append(np.mean(train_loss_batch[-tot_batches:]))
         save_loss(max_lr_epoch, save_dir, 'max_learning_rates.txt')
         save_loss(lr_epoch, save_dir, 'learning_rates.txt')
@@ -184,8 +203,8 @@ def validate(model, dataset):
     feed_dict = {model.input_images: dataset.data['val_images'],
                  model.labels: dataset.data['val_labels'],
                  model.use_past_bt: False,
-                 model.h1_past_bt: np.zeros((dataset.n_val,model.cfg.h1_dim)),
-                 model.h2_past_bt: np.zeros((dataset.n_val,model.cfg.h2_dim))
+                 model.input_past_bt: np.zeros((dataset.n_val,model.cfg.input_height,model.cfg.input_width,model.cfg.input_nchannels)),
+                 model.fc4_past_bt: np.zeros((dataset.n_val,1000))
                 }
     val_loss, val_acc = model.sess.run([model.loss, model.accuracy], feed_dict=feed_dict)
     print 'validation_loss: {:.3f}  validation_acc: {:.3f}\n'.format(val_loss,val_acc)
@@ -194,7 +213,7 @@ def validate(model, dataset):
 
 if __name__=="__main__":
     ## dataset_name
-    dataset_name = 'mnist'
+    dataset_name = 'cifar10'
 
     ## gpu_run?
     final_run = False
@@ -225,6 +244,7 @@ if __name__=="__main__":
     
     ## Model
     print 'Creating Model...'
+    print 'DROPOUT NOT IMPLEMENTED CORRECTLY FOR VALIDATION!!!'
     model = get_model(dataset_name, cfg)
     #model.summary()
 

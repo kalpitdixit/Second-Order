@@ -20,7 +20,7 @@ def plot_loss(losses, save_dir, plotname, title=''):
     plt.semilogy(losses)
     plt.grid()
     plt.xlabel('iteration')
-    plt.ylabel('training cost')
+    plt.ylabel('cost')
     plt.title(title)
     plt.savefig(os.path.join(save_dir, 'plot_'+plotname))
     return

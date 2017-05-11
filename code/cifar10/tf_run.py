@@ -20,18 +20,18 @@ DTYPE = 'float32'
 
 class Config(object):
     def __init__(self, save_dir=None):
-        self.input_dim  = 784
+        self.input_height    = 32
+        self.input_width     = 32
+        self.input_nchannels = 3
         self.output_dim = 10
-        self.h1_dim     = 1000
-        self.h2_dim     = 1000
         self.keep_prob  = 0.5
 
-        self.max_epochs = 1
+        self.max_epochs = 100
         self.batch_size = 128
         self.learning_rate = 1e-1
         self.momentum = 0.9
         self.nesterov = True
-        self.optimizer = 'sgd'
+        self.optimizer = 'adam'
         
         if save_dir is not None:
             self.save(save_dir)
@@ -62,12 +62,11 @@ def train(model, dataset, cfg):
             batch_inds = inds[batch_num*cfg.batch_size:min((batch_num+1)*cfg.batch_size,dataset.n_train)]
             feed_dict = {model.input_images: dataset.data['train_images'][batch_inds,:],
                          model.labels: dataset.data['train_labels'][batch_inds],
-                         model.lr: cfg.learning_rate,
                          model.use_past_bt: False,
-                         model.h1_past_bt: np.zeros((len(batch_inds),model.cfg.h1_dim)),
-                         model.h2_past_bt: np.zeros((len(batch_inds),model.cfg.h2_dim))
+                         model.input_past_bt: np.zeros((len(batch_inds),model.cfg.input_height,model.cfg.input_width,model.cfg.input_nchannels)),
+                         model.fc4_past_bt: np.zeros((len(batch_inds),1000))
                         }
-            loss, acc, _ = model.sess.run([model.loss, model.accuracy, model.train_op], feed_dict=feed_dict)
+            loss, acc, _, grads = model.sess.run([model.loss, model.accuracy, model.train_op, model.grads], feed_dict=feed_dict)
             train_loss_batch.append(loss)
             train_acc_batch.append(acc)
             print 'Epoch-Batch: {:3d}-{:3d}  train_loss: {:.3f}  train_acc:{:.3f}'.format(epoch+1,batch_num+1,
@@ -86,8 +85,8 @@ def validate(model, dataset):
     feed_dict = {model.input_images: dataset.data['val_images'],
                  model.labels: dataset.data['val_labels'],
                  model.use_past_bt: False,
-                 model.h1_past_bt: np.zeros((dataset.n_val,model.cfg.h1_dim)),
-                 model.h2_past_bt: np.zeros((dataset.n_val,model.cfg.h2_dim))
+                 model.input_past_bt: np.zeros((dataset.n_val,model.cfg.input_height,model.cfg.input_width,model.cfg.input_nchannels)),
+                 model.fc4_past_bt: np.zeros((dataset.n_val,1000))
                 }
     val_loss, val_acc = model.sess.run([model.loss, model.accuracy], feed_dict=feed_dict)
     print 'validation_loss: {:.3f}  validation_acc: {:.3f}\n'.format(val_loss,val_acc)
@@ -96,10 +95,10 @@ def validate(model, dataset):
 
 if __name__=="__main__":
     ## dataset
-    dataset_name = 'mnist'
+    dataset_name = 'cifar10'
 
     ## gpu_run?
-    final_run = False
+    final_run = True
 
     ## create unique run_id and related directory
     while True:
@@ -127,6 +126,7 @@ if __name__=="__main__":
     
     ## Model
     print 'Creating Model...'
+    print 'DROPOUT NOT IMPLEMENTED CORRECTLY FOR VALIDATION!!!'
     model = get_model(dataset_name, cfg)
     #model.summary()
 

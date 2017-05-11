@@ -19,6 +19,7 @@ from keras.optimizers import SGD, Adam
 from keras.backend import categorical_crossentropy
 
 from data_handler import Dataset
+from models import get_model
 
 DTYPE = 'float32'
 
