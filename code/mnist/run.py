@@ -15,7 +15,7 @@ from keras import backend as K
 from keras.layers import Input, Dense, Activation, Dropout
 from keras.models import Model
 from keras import optimizers
-from keras.optimizers import SGD, BB, BB_momentum, Adam, Adadelta_momentum
+from keras.optimizers import SGD, Adam
 from keras.backend import categorical_crossentropy
 
 from data_handler import Dataset
@@ -30,7 +30,7 @@ class Config(object):
         self.batch_size = 128
         self.learning_rate = 1e-1
         self.momentum = 0.0
-        self.optimizer = 'sgd'
+        self.optimizer = 'adam'
         self.base_lr = 1.0
         self.per_param = True
         self.use_abs = False
@@ -44,6 +44,10 @@ class Config(object):
         fname = os.path.join(save_dir, 'config.pkl') 
         with open(fname, 'w') as f:
             pickle.dump(self.__dict__, f, 2)
+        fname = os.path.join(save_dir, 'config.txt') 
+        with open(fname, 'w') as f:
+            for k in self.__dict__:
+                f.write(k+': '+str(self.__dict__[k])+'\n')
 
 
 def create_feedforward_classifier_model(cfg=Config()):
@@ -168,12 +172,12 @@ def plot_loss(losses, save_dir, plotname, title=''):
 
 if __name__=="__main__":
     ## gpu_run?
-    final_run = True
+    final_run = False
 
     ## create unique run_id and related directory
     while True:
         run_id = np.random.randint(low=1000000000, high=9999999999) # 10 digits
-        save_dir = '/atlas/u/kalpit/Second-Order/code/mnist/output_' + str(run_id)
+        save_dir = os.path.join(os.getcwd(), 'output_'+str(run_id))
         if not os.path.exists(save_dir):
             break
     #run_id = run_id
@@ -188,18 +192,20 @@ if __name__=="__main__":
     print 'testing'
 
     ## Data
-    data_dir = '/atlas/u/kalpit/data'
+    data_dir = '/scail/data/group/atlas/kalpit/data/mnist'
     dataset = Dataset(data_dir)
 
     ## Config
     cfg = Config(save_dir)
     
     ## Model
+    print 'Creating Model...'
     model = create_feedforward_classifier_model()
     model.summary()
     compile_model(model, cfg)
 
     ## Train
+    print 'Training Model...'
     starttime = time.time()
     train_loss_batch, train_acc_batch, train_loss, val_loss, val_acc = train(model, dataset, cfg)
     endtime = time.time()

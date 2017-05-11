@@ -11,24 +11,23 @@ import tensorflow as tf
 import tensorflow.contrib.layers as layers
 
 from data_handler import Dataset
-
+from dropout import dropout
 DTYPE = 'float32'
 
 class Config(object):
     def __init__(self, save_dir=None):
         self.input_dim  = 784
         self.output_dim = 10
-        self.max_epochs = 1
+        self.h1_dim     = 1000
+        self.h2_dim     = 1000
+        self.keep_prob  = 0.5
+
+        self.max_epochs = 100
         self.batch_size = 128
         self.learning_rate = 1e-1
-        self.momentum = 0.0
-        self.optimizer = 'adam'
-        self.base_lr = 1.0
-        self.per_param = True
-        self.use_abs = False
-        self.lbound = 0 # -1e100
-        self.ubound = 1e0 #1e100
-        self.rho = 0.95
+        self.momentum = 0.9
+        self.optimizer = 'adadelta'
+        
         if save_dir is not None:
             self.save(save_dir)
 
@@ -65,10 +64,12 @@ class Model(object):
         self.lr = tf.placeholder(tf.float32, shape=(), name='lr')
 
         ## forward pass, note how this is pre-softmax
-        h1 = layers.fully_connected(self.input_images, num_outputs=1000, activation_fn=tf.nn.relu, scope='h1')
-        h1 = tf.nn.dropout(h1, keep_prob=0.5)
-        h2 = layers.fully_connected(h1, num_outputs=1000, activation_fn=tf.nn.relu, scope='h2')
-        h2 = tf.nn.dropout(h2, keep_prob=0.5)
+        h1 = layers.fully_connected(self.input_images, num_outputs=cfg.h1_dim, activation_fn=tf.nn.relu, scope='h1')
+        h1, _ = dropout(h1, keep_prob=cfg.keep_prob)
+        #h1 = tf.nn.dropout(h1, keep_prob=0.5)
+        h2 = layers.fully_connected(h1, num_outputs=cfg.h2_dim, activation_fn=tf.nn.relu, scope='h2')
+        h2, _ = dropout(h2, keep_prob=cfg.keep_prob)
+        #h2 = tf.nn.dropout(h2, keep_prob=0.5)
         self.preds = layers.fully_connected(h2, num_outputs=self.cfg.output_dim, activation_fn=None, scope='preds')
 
         ## loss and accuracy
@@ -80,6 +81,8 @@ class Model(object):
         ## training op
         if cfg.optimizer=='adam':
             optimizer = tf.train.AdamOptimizer()
+        elif cfg.optimizer=='adadelta':
+            optimizer = tf.train.AdadeltaOptimizer()
         elif cfg.optimizer=='sgd':
             optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.lr)
         gvs = optimizer.compute_gradients(self.loss, var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
@@ -167,7 +170,7 @@ def plot_loss(losses, save_dir, plotname, title=''):
 
 if __name__=="__main__":
     ## gpu_run?
-    final_run = False
+    final_run = True
 
     ## create unique run_id and related directory
     while True:

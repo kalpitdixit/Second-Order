@@ -9,17 +9,20 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import math
+from collections import OrderedDict
 
 import theano
 import theano.tensor as T
 from theano.gof import Variable as V
+from theano.gof import Generic
 import keras
 from keras import backend as K
 from keras.layers import Input, Dense, Activation, Dropout
 from keras.models import Model
 from keras import optimizers
-from keras.optimizers import SGD, BB, BB_momentum, Adam, Adadelta_momentum
+from keras.optimizers import SGD, Adam
 from keras.backend import categorical_crossentropy
+import theano.sandbox.cuda as cuda
 
 from data_handler import Dataset
 
@@ -47,6 +50,10 @@ class Config(object):
         fname = os.path.join(save_dir, 'config.pkl') 
         with open(fname, 'w') as f:
             pickle.dump(self.__dict__, f, 2)
+        fname = os.path.join(save_dir, 'config.txt')
+        with open(fname, 'w') as f:
+            for k in self.__dict__:
+                f.write(k+': '+str(self.__dict__[k])+'\n')
 
 
 def create_feedforward_classifier_model(cfg=Config()):
@@ -65,22 +72,13 @@ def create_feedforward_classifier_model(cfg=Config()):
 def compile_model(model, cfg):
     if cfg.optimizer=='sgd':
         opt = SGD(lr=cfg.learning_rate, momentum=cfg.momentum)
-    elif cfg.optimizer=='bb':
-        opt = BB(base_lr=cfg.base_lr, per_param=cfg.per_param, use_abs=cfg.use_abs, lbound=cfg.lbound, ubound=cfg.ubound)
     elif cfg.optimizer=='adam':
         opt = 'adam'
-    elif cfg.optimizer=='aa':
-        opt = 'aa'
-    elif cfg.optimizer=='bb_mom':
-        opt = BB_momentum(base_lr=cfg.base_lr, per_param=cfg.per_param, use_abs=cfg.use_abs, 
-                          lbound=cfg.lbound, ubound=cfg.ubound, rho=cfg.rho)
-    elif cfg.optimizer=='adadelta_mom':
-        opt = Adadelta_momentum(momentum=cfg.momentum)
     print 'Using Optimizer: {}'.format(cfg.optimizer)
     model.compile(optimizer=opt,
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
-    return
+    return opt
     
 
 def set_weights(model, computed_gradients, alpha):
@@ -94,7 +92,7 @@ def set_weights(model, computed_gradients, alpha):
     return 
 
 
-def train(model, dataset, cfg):
+def train(model, opt, dataset, cfg):
     train_loss_batch = [] # record_loss
     train_acc_batch = [] # record_accuracy
     train_loss = []
@@ -111,10 +109,21 @@ def train(model, dataset, cfg):
                      model.sample_weights[0], # how much to weight each sample by
                      model.targets[0], # labels
                      K.learning_phase(), # train or test mode
-    ]
+                    ]
     get_gradients = K.function(inputs=input_tensors, outputs=gradients)
     ##################
+    ##################
+    #print [type(x) for x in model.trainable_weights]
+    #exit()
+    #alpha = 0
+    #trainable_weights = model.trainable_weights
+    ##updates = OrderedDict([(trainable_weights[i], trainable_weights[i]+alpha*gradients[i]) for i in range(len(trainable_weights))])
+    #updates = [(trainable_weights[i], trainable_weights[i]+alpha*gradients[i]) for i in range(len(trainable_weights))]
+    #print 'input check', np.any([isinstance(i, (list, tuple)) for i in [alpha]+ gradients])
+    #update_weights = K.function(inputs=[], outputs=[], updates=updates)
+    ##################
 
+    print 'Beginning Iterations...'
     for epoch in range(cfg.max_epochs):
         inds = range(dataset.n_train)
         np.random.shuffle(inds)
@@ -128,6 +137,9 @@ def train(model, dataset, cfg):
             ## set alpha
             if epoch==0 and batch_num==0:
                 alpha = 1e-2
+                #a = theano._asarray(np.random.rand(*()), dtype='float32')
+                #alpha = cuda.CudaNdarraySharedVariable(name='alpha',type=Generic(),strict=False,value=1e-2)
+                #alpha.set_value(1e-2)
             ## get first gradient, g
             computed_gradients = get_gradients([dataset.data['train_images'][batch_inds,:], np.ones(len(batch_inds)), batch_labels, False])
             gT_g = np.sum([np.sum(np.square(g)) for g in computed_gradients])
@@ -139,6 +151,22 @@ def train(model, dataset, cfg):
             train_loss_batch.append(fx)
             train_acc_batch.append(train_acc)
             ## get f(x+alpaha*g)
+            """
+            update_weights([alpha, computed_gradients])
+            #opt.lr.set_value(0.0)
+            hist1 = model.fit(x = dataset.data['train_images'][batch_inds,:],
+                             y = batch_labels,
+                             batch_size = cfg.batch_size,
+                             epochs = 1,
+                             verbose = 0)   
+            hist2 = model.fit(x = dataset.data['train_images'][batch_inds,:],
+                             y = batch_labels,
+                             batch_size = cfg.batch_size,
+                             epochs = 1,
+                             verbose = 0)   
+            print hist1.history['loss'][0], hist2.history['loss'][0]
+            exit()
+            """
             set_weights(model, computed_gradients, alpha)
             fx_plus_ag, _ = model.evaluate(x = dataset.data['train_images'][batch_inds,:],
                                                      y = batch_labels,
@@ -170,7 +198,6 @@ def train(model, dataset, cfg):
             print 'chosen lr         : ', lr
             print 'epoch-batch: {:3d}-{:3d}  train_loss: {:.3f}  train_acc:{:.3f}'.format(epoch+1,batch_num+1,
                                                                                           train_loss_batch[-1],train_acc_batch[-1])
-
             ## quit?
             if gT_H_g==0.0:
                 break
@@ -257,13 +284,15 @@ if __name__=="__main__":
     cfg = Config(save_dir)
     
     ## Model
+    print 'Creating Model...'
     model = create_feedforward_classifier_model()
     model.summary()
-    compile_model(model, cfg)
+    opt = compile_model(model, cfg)
 
     ## Train
+    print 'Training Model...'
     starttime = time.time()
-    train_loss_batch, train_acc_batch, train_loss, val_loss, val_acc = train(model, dataset, cfg)
+    train_loss_batch, train_acc_batch, train_loss, val_loss, val_acc = train(model, opt, dataset, cfg)
     endtime = time.time()
     plot_loss(train_loss, save_dir, 'training_cost', 'training_cost')
     plot_loss(val_loss, save_dir, 'validation_cost', 'validation_cost')
