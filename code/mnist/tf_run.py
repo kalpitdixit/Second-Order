@@ -1,5 +1,7 @@
 import sys
 import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 import pickle
 import time
@@ -11,7 +13,9 @@ import tensorflow as tf
 import tensorflow.contrib.layers as layers
 
 from data_handler import Dataset
-from dropout import dropout
+from common.models import get_model
+from common.utils import save_loss, plot_loss
+
 DTYPE = 'float32'
 
 class Config(object):
@@ -22,11 +26,12 @@ class Config(object):
         self.h2_dim     = 1000
         self.keep_prob  = 0.5
 
-        self.max_epochs = 100
+        self.max_epochs = 1
         self.batch_size = 128
         self.learning_rate = 1e-1
         self.momentum = 0.9
-        self.optimizer = 'adadelta'
+        self.nesterov = True
+        self.optimizer = 'sgd'
         
         if save_dir is not None:
             self.save(save_dir)
@@ -40,69 +45,6 @@ class Config(object):
             for k in self.__dict__:
                 f.write(k+': '+str(self.__dict__[k])+'\n')
 
-
-class Model(object):
-    def __init__(self, config):
-        self.cfg = config
-        self.create_feedforward_classifier_model()
-        self.initialize()
-
-    def create_feedforward_classifier_model(self):
-        """
-        Creates:
-        self.input_images
-        self.labels
-        self.lr
-        self.preds - pre-softmax predictions
-        self.loss
-        self.accuracy
-        self.train_op
-        """
-        ## input placeholders
-        self.input_images = tf.placeholder(tf.float32, shape=(None,self.cfg.input_dim), name='input_images')
-        self.labels = tf.placeholder(tf.int32, shape=(None,), name='labels')
-        self.lr = tf.placeholder(tf.float32, shape=(), name='lr')
-
-        ## forward pass, note how this is pre-softmax
-        h1 = layers.fully_connected(self.input_images, num_outputs=cfg.h1_dim, activation_fn=tf.nn.relu, scope='h1')
-        h1, _ = dropout(h1, keep_prob=cfg.keep_prob)
-        #h1 = tf.nn.dropout(h1, keep_prob=0.5)
-        h2 = layers.fully_connected(h1, num_outputs=cfg.h2_dim, activation_fn=tf.nn.relu, scope='h2')
-        h2, _ = dropout(h2, keep_prob=cfg.keep_prob)
-        #h2 = tf.nn.dropout(h2, keep_prob=0.5)
-        self.preds = layers.fully_connected(h2, num_outputs=self.cfg.output_dim, activation_fn=None, scope='preds')
-
-        ## loss and accuracy
-        loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.preds, labels=self.labels)
-        self.loss = tf.reduce_mean(loss, name='loss', axis=None)
-        #self.accuracy = tf.contrib.metrics.accuracy(labels=tf.one_hot(self.labels, cfg.output_dim, dtype='float32'), predictions=self.preds)
-        self.accuracy = tf.contrib.metrics.accuracy(labels=self.labels, predictions=tf.to_int32(tf.argmax(self.preds, axis=1)))
-
-        ## training op
-        if cfg.optimizer=='adam':
-            optimizer = tf.train.AdamOptimizer()
-        elif cfg.optimizer=='adadelta':
-            optimizer = tf.train.AdadeltaOptimizer()
-        elif cfg.optimizer=='sgd':
-            optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.lr)
-        gvs = optimizer.compute_gradients(self.loss, var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
-        grads, vrbs = zip(*gvs)
-        self.train_op = optimizer.apply_gradients(gvs)
-        
-        ### op to just apply passed gradients
-        #main_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=scope)
-        #print [x.shape for x in grads]
-        #passed_grads = [self.conv1_W_grad, self.conv1_b_grad, self.conv2_W_grad, self.conv2_b_grad,
-        #                self.conv3_W_grad, self.conv3_b_grad, self.fc4_W_grad, self.fc4_b_grad,
-        #                self.fc5_W_grad, self.fc5_b_grad]
-        #passed_gvs = zip(passed_grads, vrbs)
-        #self.change_weights_op = optimizer.apply_gradients(passed_gvs)
-    
-    def initialize(self):
-        self.sess = tf.Session()
-        init = tf.global_variables_initializer()
-        self.sess.run(init)
-    
 
 def train(model, dataset, cfg):
     train_loss_batch = [] # record_loss
@@ -119,8 +61,11 @@ def train(model, dataset, cfg):
         for batch_num in range(tot_batches):
             batch_inds = inds[batch_num*cfg.batch_size:min((batch_num+1)*cfg.batch_size,dataset.n_train)]
             feed_dict = {model.input_images: dataset.data['train_images'][batch_inds,:],
-                         model.labels: dataset.data['train_labels'][batch_inds]
-                         #model.lr: cfg.learning_rate
+                         model.labels: dataset.data['train_labels'][batch_inds],
+                         model.lr: cfg.learning_rate,
+                         model.use_past_bt: False,
+                         model.h1_past_bt: np.zeros((len(batch_inds),model.cfg.h1_dim)),
+                         model.h2_past_bt: np.zeros((len(batch_inds),model.cfg.h2_dim))
                         }
             loss, acc, _ = model.sess.run([model.loss, model.accuracy, model.train_op], feed_dict=feed_dict)
             train_loss_batch.append(loss)
@@ -139,38 +84,19 @@ def train(model, dataset, cfg):
 
 def validate(model, dataset):
     feed_dict = {model.input_images: dataset.data['val_images'],
-                 model.labels: dataset.data['val_labels']
+                 model.labels: dataset.data['val_labels'],
+                 model.use_past_bt: False,
+                 model.h1_past_bt: np.zeros((dataset.n_val,model.cfg.h1_dim)),
+                 model.h2_past_bt: np.zeros((dataset.n_val,model.cfg.h2_dim))
                 }
     val_loss, val_acc = model.sess.run([model.loss, model.accuracy], feed_dict=feed_dict)
     print 'validation_loss: {:.3f}  validation_acc: {:.3f}\n'.format(val_loss,val_acc)
     return val_loss, val_acc
-             
-
-def save_loss(losses, save_dir, fname, first_use=False):
-    if first_use:
-        f = open(os.path.join(save_dir, fname), 'w')
-    else:
-        f = open(os.path.join(save_dir, fname), 'a')
-    for loss in losses:
-        f.write(str(loss)+'\n')
-    f.close()
-    return
-
-
-def plot_loss(losses, save_dir, plotname, title=''):
-    plt.figure()
-    plt.semilogy(train_loss)
-    plt.grid()
-    plt.xlabel('iteration')
-    plt.ylabel('training cost')
-    plt.title(title)
-    plt.savefig(os.path.join(save_dir, 'plot_'+plotname))
-    return
-
+            
 
 if __name__=="__main__":
     ## gpu_run?
-    final_run = True
+    final_run = False
 
     ## create unique run_id and related directory
     while True:
@@ -198,7 +124,7 @@ if __name__=="__main__":
     
     ## Model
     print 'Creating Model...'
-    model = Model(cfg)
+    model = get_model('mnist', cfg)
     #model.summary()
 
     ## Train
