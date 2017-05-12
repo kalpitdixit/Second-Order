@@ -27,11 +27,14 @@ class Config(object):
         self.h2_dim     = 1000
         self.keep_prob  = 0.5
 
-        self.max_epochs = 1
+        self.max_epochs = 20
         self.batch_size = 128
+        self.momentum = 0.90
+        self.use_nesterov = False
         self.optimizer = 'kalpit'
+        self.magic_2nd_order = True
 
-        self.magic_2nd_order = False
+        self.notes = 'fx'
 
         if save_dir is not None:
             self.save(save_dir)
@@ -57,6 +60,7 @@ def train(model, dataset, cfg):
     save_loss([], save_dir, 'max_learning_rates.txt', first_use=True)
     save_loss([], save_dir, 'learning_rates.txt', first_use=True)
     alpha = 1e-2
+    moms = []
     for epoch in range(cfg.max_epochs):
         inds = range(dataset.n_train)
         np.random.shuffle(inds)
@@ -116,23 +120,24 @@ def train(model, dataset, cfg):
 
             ## choose learning rate
             st = time.time()
+            gT_H_g = (fx_plus_ag + fx_minus_ag - 2*fx)/(alpha**2)
             if not cfg.magic_2nd_order:
-                gT_H_g = (fx_plus_ag + fx_minus_ag - 2*fx)/(alpha**2)
                 max_lr = 2*gT_g/np.abs(gT_H_g)
                 lr = min(fx/gT_g, max_lr)
                 max_lr_epoch.append(max_lr)
                 lr_epoch.append(lr)
             
             else: ## 2nd order magic
-                if gT_H_g <= 0.0:
-                    max_lr = lr = - (-gt_g + np.sqrt(gt_g**2-2*gt_h_g*fx)) / gt_h_g
+                if gT_H_g==0.0:
+                    max_lr = lr = 0.0
                 else:
-                    if gt_g**2-2*gt_h_g*fx >= 0:
-                        max_lr = lr = - (-gT_g + np.sqrt(gT_g**2-2*gT_H_g*fx)) / gT_H_g
+                    delta_f = fx
+                    if gT_g**2-2*gT_H_g*delta_f >= 0:
+                        max_lr = lr = - (-gT_g + np.sqrt(gT_g**2-2*gT_H_g*delta_f)) / gT_H_g
                     else:
                         max_lr = lr = - (-gT_g/gT_H_g)
             print 'choose lr: ', time.time()-st
-            
+    
             ## print
             st = time.time()
             if True:
@@ -157,7 +162,19 @@ def train(model, dataset, cfg):
                 exit()
 
             ## update step
-            research_fd[model.lr] = -alpha+lr
+            # reset to x
+            research_fd[model.lr] = -alpha
+            model.sess.run(model.change_weights_op, feed_dict=research_fd)
+            # momentum
+            if moms==[]:
+                moms = grads[:]
+            else:
+                moms = [model.cfg.momentum*moms[i] + grads[i] for i in range(len(moms))]    
+            research_fd = {model.h1_W_grad: moms[0],    model.h1_b_grad: moms[1],
+                           model.h2_W_grad: moms[2],    model.h2_b_grad: moms[3],
+                           model.preds_W_grad: moms[4], model.preds_b_grad: moms[5],
+                          }
+            research_fd[model.lr] = lr
             model.sess.run(model.change_weights_op, feed_dict=research_fd)
 
             ## update alpha
@@ -173,10 +190,10 @@ def train(model, dataset, cfg):
         save_loss(lr_epoch, save_dir, 'learning_rates.txt')
         save_loss(train_loss[-1:], save_dir, 'training_cost.txt')
         print 'Epoch {} - Average Training Cost: {:.3f}'.format(epoch+1, train_loss[-1])
-        #vl, va = validate(model, dataset)
-        #val_loss.append(vl)
-        #val_acc.append(va)
-        #save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
+        vl, va = validate(model, dataset)
+        val_loss.append(vl)
+        val_acc.append(va)
+        save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
     return train_loss_batch, train_acc_batch, train_loss, val_loss, val_acc
 
 
@@ -197,7 +214,7 @@ if __name__=="__main__":
     dataset_name = 'mnist'
 
     ## gpu_run?
-    final_run = False
+    final_run = True
 
     ## create unique run_id and related directory
     while True:

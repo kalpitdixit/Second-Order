@@ -6,6 +6,7 @@ from tensorflow.python.ops import math_ops
 
 from dropout import dropout
 
+
 class MNIST_Model(object):
     def __init__(self, config):
         self.cfg = config
@@ -57,7 +58,7 @@ class MNIST_Model(object):
             optimizer = tf.train.MomentumOptimizer(learning_rate=self.cfg.learning_rate, momentum=self.cfg.momentum, 
                                                    use_nesterov=self.cfg.nesterov)
         elif self.cfg.optimizer=='adam':
-            optimizer = tf.train.AdamOptimizer()
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.cfg.learning_rate, beta1=self.cfg.beta1, beta2=self.cfg.beta2)
         elif self.cfg.optimizer=='adadelta':
             optimizer = tf.train.AdadeltaOptimizer()
         gvs = optimizer.compute_gradients(self.loss, var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
@@ -147,12 +148,14 @@ class CIFAR10_Model(object):
 
         ## training op
         if self.cfg.optimizer=='kalpit':
+            #optimizer = tf.train.MomentumOptimizer(learning_rate=self.lr, momentum=self.cfg.momentum, 
+            #                                       use_nesterov=self.cfg.nesterov)
             optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.lr) # can set lr every minibatch
         if self.cfg.optimizer=='sgd':
             optimizer = tf.train.MomentumOptimizer(learning_rate=self.cfg.learning_rate, momentum=self.cfg.momentum, 
                                                    use_nesterov=self.cfg.nesterov)
         elif self.cfg.optimizer=='adam':
-            optimizer = tf.train.AdamOptimizer()
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.cfg.learning_rate, beta1=self.cfg.beta1, beta2=self.cfg.beta2)
         elif self.cfg.optimizer=='adadelta':
             optimizer = tf.train.AdadeltaOptimizer()
         gvs = optimizer.compute_gradients(self.loss, var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
