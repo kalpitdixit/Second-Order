@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 
 import tensorflow as tf
 import tensorflow.contrib.layers as layers
-from tensorflow.python.ops import math_ops
 
 from data_handler import Dataset
 from common.models import get_model
@@ -25,14 +24,11 @@ class Config(object):
         self.input_width     = 32
         self.input_nchannels = 3
         self.output_dim = 10
-        self.h1_dim     = 1000
-        self.h2_dim     = 1000
-        self.keep_prob  = 0.5
+        self.keep_prob  = 0.8
 
-        self.max_epochs = 1
+        self.max_epochs = 200
         self.batch_size = 128
         self.optimizer = 'kalpit'
-
         self.magic_2nd_order = False
 
         if save_dir is not None:
@@ -137,13 +133,11 @@ def train(model, dataset, cfg):
                 max_lr = 2*gT_g/np.abs(gT_H_g)
                 lr = min(fx/gT_g, max_lr)
             else: ## 2nd order magic
-                if gT_H_g <= 0.0:
+                if gT_g**2-2*gT_H_g*fx > 0:
                     max_lr = lr = - (-gT_g + np.sqrt(gT_g**2-2*gT_H_g*fx)) / gT_H_g
                 else:
-                    if gT_g**2-2*gT_H_g*fx >= 0:
-                        max_lr = lr = - (-gT_g + np.sqrt(gT_g**2-2*gT_H_g*fx)) / gT_H_g
-                    else:
-                        max_lr = lr = - (-gT_g/gT_H_g)
+                    max_lr = lr = - (-gT_g/gT_H_g)
+
             max_lr_epoch.append(max_lr)
             lr_epoch.append(lr)
             times[7].append(time.time()-st)
@@ -216,7 +210,7 @@ if __name__=="__main__":
     dataset_name = 'cifar10'
 
     ## gpu_run?
-    final_run = False
+    final_run = True
 
     ## create unique run_id and related directory
     while True:

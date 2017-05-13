@@ -159,6 +159,8 @@ if __name__=="__main__":
     beta1 = [0.9, 0.95, 0.99, 0.995]
     beta2 = [0.9, 0.99, 0.999, 0.9999]
     params = list(itertools.product(lr, beta1, beta2))
+    params = [(0.0001, 0.9, 0.99)] + params[23:]
+    print params
     #params = [(1e-3,0.9,0.9999)]
 
     best_loss = float('inf')
@@ -171,6 +173,7 @@ if __name__=="__main__":
 
         ## Config
         cfg = Config()
+        cfg.max_epochs = 50
         cfg.optimizer = 'adam'
         cfg.learning_rate = params[i][0] # 1e-1 for sgd, 1e-3 for adam
         cfg.beta1 = params[i][1] # for adam
