@@ -29,10 +29,10 @@ class Config(object):
 
         self.max_epochs = 20
         self.batch_size = 128
-        self.momentum = 0.90
+        self.momentum = 0.0 ## momentum is being used
         self.use_nesterov = False
         self.optimizer = 'kalpit'
-        self.magic_2nd_order = True
+        self.magic_2nd_order = False
 
         self.notes = 'fx'
 
@@ -81,7 +81,7 @@ def train(model, dataset, cfg):
                  }
             loss, acc, grads, h1_bt, h2_bt = model.sess.run([model.loss, model.accuracy, model.grads, 
                                                              model.h1_binary_tensor, model.h2_binary_tensor], 
-                                                            feed_dict=fd)
+                                                             feed_dict=fd)
             fx = loss
             train_loss_batch.append(loss)
             train_acc_batch.append(acc)
@@ -190,10 +190,10 @@ def train(model, dataset, cfg):
         save_loss(lr_epoch, save_dir, 'learning_rates.txt')
         save_loss(train_loss[-1:], save_dir, 'training_cost.txt')
         print 'Epoch {} - Average Training Cost: {:.3f}'.format(epoch+1, train_loss[-1])
-        vl, va = validate(model, dataset)
-        val_loss.append(vl)
-        val_acc.append(va)
-        save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
+        #vl, va = validate(model, dataset)
+        #val_loss.append(vl)
+        #val_acc.append(va)
+        #save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
     return train_loss_batch, train_acc_batch, train_loss, val_loss, val_acc
 
 

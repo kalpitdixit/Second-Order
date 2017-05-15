@@ -106,14 +106,20 @@ def validate(model, dataset):
 
 def get_save_dir(cfg):
     save_dir = os.path.join(os.getcwd(), 'results', cfg.optimizer)
-    if os.path.exists(save_dir):
-        with open('num_files', 'r') as f:
+    nfiles_fname = os.path.join(save_dir,'num_files')
+    if os.path.exists(nfiles_fname):
+        with open(nfiles_fname, 'r') as f:
             nfiles = int(f.readline().strip())
     else:
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
         nfiles = 0
-    with open('num_files', 'w') as f:
-        f.write(str(nfiles+1))
-    save_dir = os.path.join(save_dir, 'run_'+str(nfiles+1))
+    nfiles += 1
+    while os.path.exists(os.path.join(save_dir, 'run_'+str(nfiles))):
+        nfiles += 1
+    with open(nfiles_fname, 'w') as f:
+        f.write(str(nfiles))
+    save_dir = os.path.join(save_dir, 'run_'+str(nfiles))
     os.makedirs(save_dir)
     print 'save_dir: ', save_dir
     return save_dir
