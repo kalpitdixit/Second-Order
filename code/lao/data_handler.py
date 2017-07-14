@@ -3,11 +3,19 @@ import numpy as np
 
 class Dataset(object):
     def __init__(self, data_dir):
+        self.is_cifar10 = 'cifar10' in data_dir
         self.data_dir = data_dir
         self.data = self.get_data()
         self.n_train = self.data['train_images'].shape[0]
         self.n_val   = self.data['val_images'].shape[0]
-        self.n_test  = self.data['test_images'].shape[0]
+        if not self.is_cifar10:
+            self.n_test  = self.data['test_images'].shape[0]
+
+    def data_reshape(self, shape):
+        self.data['train_images'] = self.data['train_images'].reshape(self.n_train,shape[0],shape[1],shape[2])
+        self.data['val_images']   = self.data['val_images'].reshape(self.n_val,shape[0],shape[1],shape[2])
+        if not self.is_cifar10:
+            self.data['test_images']  = self.data['test_images'].reshape(self.n_test,shape[0],shape[1],shape[2])
 
     def get_data(self):
         """
@@ -28,7 +36,8 @@ class Dataset(object):
         data['val_images'] = np.load(os.path.join(self.data_dir, 'validation', 'images.npy'))
         data['val_labels'] = np.load(os.path.join(self.data_dir, 'validation', 'labels.npy'))
         ### testing
-        data['test_images'] = np.load(os.path.join(self.data_dir, 'testing', 'images.npy'))
-        data['test_labels'] = np.load(os.path.join(self.data_dir, 'testing', 'labels.npy'))
+        if not self.is_cifar10:
+            data['test_images'] = np.load(os.path.join(self.data_dir, 'testing', 'images.npy'))
+            data['test_labels'] = np.load(os.path.join(self.data_dir, 'testing', 'labels.npy'))
         return data
 
