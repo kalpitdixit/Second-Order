@@ -16,8 +16,10 @@ import tensorflow.contrib.layers as layers
 
 from data_handler import Dataset
 from common.models import get_model
-from train_funcs import train_ff_vanilla,   train_ff_kalpit   # train functions
-from train_funcs import train_conv_vanilla, train_conv_kalpit # train functions
+from train_funcs import train_ff_vanilla,          train_ff_kalpit          # train functions
+from train_funcs import train_conv_vanilla,        train_conv_kalpit        # train functions
+from train_funcs import train_autoencoder_vanilla, train_autoencoder_kalpit # train functions
+from train_funcs import validate_ff, validate_conv, validate_autoencoder    # validation functions
 from common.utils import save_loss, plot_loss, get_save_dir
 
 DTYPE = 'float32'
@@ -27,16 +29,21 @@ class Config(object):
         ## network definition
         if args.dataset=='mnist':
             if args.network=='ff':
-                self.input_dim  = 784
+                self.input_dim = 784
             elif args.network=='conv':
                 self.input_height   = 28
                 self.input_width    = 28
                 self.input_nchannels = 1
+            elif args.network=='autoencoder':
+                self.input_dim = 784
             self.output_dim = 10
         if args.dataset=='cifar10':
-            self.input_height   = 32
-            self.input_width    = 32
-            self.input_nchannels = 3
+            if args.network=='conv':
+                self.input_height   = 32
+                self.input_width    = 32
+                self.input_nchannels = 3
+            elif args.network=='autoencoder':
+                self.input_dim = 3072
             self.output_dim = 10
         self.h1_dim     = 1000
         self.h2_dim     = 1000
@@ -108,6 +115,11 @@ def main(dataset_name, network, save_dir, cfg):
             train_loss, val_loss, val_acc = train_conv_kalpit(model, dataset, cfg, save_dir)
         else:
             train_loss, val_loss, val_acc = train_conv_vanilla(model, dataset, cfg, save_dir)
+    elif network=='autoencoder':
+        if cfg.optimizer=='kalpit':
+            train_loss, val_loss = train_autoencoder_kalpit(model, dataset, cfg, save_dir)
+        else:
+            train_loss, val_loss = train_autoencoder_vanilla(model, dataset, cfg, save_dir)
     endtime = time.time()
     #plot_loss(train_loss, save_dir, 'training_cost', 'training_cost')
     #plot_loss(val_loss, save_dir, 'validation_cost', 'validation_cost')
@@ -115,7 +127,12 @@ def main(dataset_name, network, save_dir, cfg):
     ## Validate
     print ''
     print 'Final Validation...'
-    validate(model, dataset)
+    if network=='ff':
+        validate_ff(model, dataset)
+    elif network=='conv':
+        validate_conv(model, dataset)
+    elif network=='autoencoder':
+        validate_autoencoder(model, dataset)
     
     ## Training Time
     print 'Training Time: {:.2f}'.format(endtime - starttime)
@@ -128,7 +145,7 @@ def ArgumentParser():
     parser.add_argument('dataset', choices=['mnist', 'cifar10'])
     parser.add_argument('network', choices=['ff', 'conv', 'autoencoder'])
     parser.add_argument('keep_prob', type=float, default=0.5)
-    parser.add_argument('optimizer', choices=['sgd', 'kalpit'])
+    parser.add_argument('optimizer', choices=['sgd', 'adam', 'kalpit'])
     parser.add_argument('--final_run', action='store_true', default=False)
 
     ## learning schedule
@@ -136,13 +153,13 @@ def ArgumentParser():
 
     ## optimizer parameters 
     parser.add_argument('--learning_rate', type=float, default=1e-3) # general optimizer
-    parser.add_argument('--momentum', type=float, default=0.9)       # general optimizer
+    parser.add_argument('--momentum', type=float, default=0.0)       # general optimizer
     # sgd
     parser.add_argument('--nesterov', action='store_true', default=False) # sgd
     # adam
     parser.add_argument('--beta1',   type=float, default=0.99)  # adam
     parser.add_argument('--beta2',   type=float, default=0.999) # adam
-    parser.add_argument('--epsilon', type=float, default=0.999) # adam
+    parser.add_argument('--epsilon', type=float, default=1e-8)  # adam
     # adadelta
     parser.add_argument('--rho', type=float, default=0.95)  # rho
     
