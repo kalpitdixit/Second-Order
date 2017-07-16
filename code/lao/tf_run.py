@@ -16,10 +16,10 @@ import tensorflow.contrib.layers as layers
 
 from data_handler import Dataset
 from common.models import get_model
-from train_funcs import train_ff_vanilla,          train_ff_kalpit          # train functions
-from train_funcs import train_conv_vanilla,        train_conv_kalpit        # train functions
-from train_funcs import train_autoencoder_vanilla, train_autoencoder_kalpit # train functions
-from train_funcs import validate_ff, validate_conv, validate_autoencoder    # validation functions
+from train_funcs_dev import train_ff_vanilla,          train_ff_kalpit          # train functions
+from train_funcs_dev import train_conv_vanilla,        train_conv_kalpit        # train functions
+from train_funcs_dev import train_autoencoder_vanilla, train_autoencoder_kalpit # train functions
+from train_funcs_dev import validate_ff, validate_conv, validate_autoencoder    # validation functions
 from common.utils import save_loss, plot_loss, get_save_dir
 
 DTYPE = 'float32'
@@ -120,6 +120,8 @@ def main(dataset_name, network, save_dir, cfg):
             train_loss, val_loss = train_autoencoder_kalpit(model, dataset, cfg, save_dir)
         else:
             train_loss, val_loss = train_autoencoder_vanilla(model, dataset, cfg, save_dir)
+    else:
+        raise NotImplementedError
     endtime = time.time()
     #plot_loss(train_loss, save_dir, 'training_cost', 'training_cost')
     #plot_loss(val_loss, save_dir, 'validation_cost', 'validation_cost')
