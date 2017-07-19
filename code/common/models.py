@@ -30,6 +30,7 @@ class MNIST_Model(object):
         self.input_images = tf.placeholder(tf.float32, shape=(None,self.cfg.input_dim), name='input_images')
         self.labels       = tf.placeholder(tf.int32,   shape=(None,), name='labels')
         self.lr           = tf.placeholder(tf.float32, shape=(), name='lr')
+        self.keep_prob    = tf.placeholder(tf.float32, shape=(), name='keep_prob')
         self.use_past_bt  = tf.placeholder(tf.bool,    shape=(), name='use_past_bt') # to pass previous dropout mask
         self.h1_past_bt   = tf.placeholder(tf.float32, shape=(None, self.cfg.h1_dim), name='h1_past_bt')
         self.h2_past_bt   = tf.placeholder(tf.float32, shape=(None, self.cfg.h2_dim), name='h2_past_bt')
@@ -39,10 +40,15 @@ class MNIST_Model(object):
                                     biases_initializer=layers.initializers.xavier_initializer(), scope='h1')
         h1, self.h1_binary_tensor = tf.cond(self.use_past_bt, lambda: [math_ops.div(h1,self.cfg.keep_prob)*self.h1_past_bt, self.h1_past_bt],
                                             lambda: dropout(h1, keep_prob=self.cfg.keep_prob))
+        #h1, self.h1_binary_tensor = tf.cond(self.use_past_bt, lambda: [math_ops.div(h1,self.keep_prob)*self.h1_past_bt, self.h1_past_bt],
+        #                                    lambda: dropout(h1, keep_prob=self.keep_prob))
         h2 = layers.fully_connected(h1, num_outputs=self.cfg.h2_dim, activation_fn=tf.nn.relu,
                                     biases_initializer=layers.initializers.xavier_initializer(), scope='h2')
         h2, self.h2_binary_tensor = tf.cond(self.use_past_bt, lambda: [math_ops.div(h2,self.cfg.keep_prob)*self.h2_past_bt, self.h2_past_bt],
                                             lambda: dropout(h2, keep_prob=self.cfg.keep_prob))
+        #h2, self.h2_binary_tensor = tf.cond(self.use_past_bt, lambda: [math_ops.div(h2,self.keep_prob)*self.h2_past_bt, self.h2_past_bt],
+        #                                    lambda: dropout(h2, keep_prob=self.keep_prob))
+        self.h2 = h2
         self.preds = layers.fully_connected(h2, num_outputs=self.cfg.output_dim, activation_fn=None,
                                             biases_initializer=layers.initializers.xavier_initializer(), scope='preds')
 
@@ -60,7 +66,7 @@ class MNIST_Model(object):
         elif self.cfg.optimizer=='adam':
             optimizer = tf.train.AdamOptimizer(learning_rate=self.cfg.learning_rate, beta1=self.cfg.beta1, beta2=self.cfg.beta2)
         elif self.cfg.optimizer=='adadelta':
-            optimizer = tf.train.AdadeltaOptimizer()
+            optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.cfg.learning_rate, rho=self.cfg.rho)
         gvs = optimizer.compute_gradients(self.loss, var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
         self.grads, vrbs = zip(*gvs)
         self.train_op = optimizer.apply_gradients(gvs)
@@ -77,9 +83,18 @@ class MNIST_Model(object):
                         self.preds_W_grad, self.preds_b_grad]
         passed_gvs = zip(passed_grads, vrbs)
         self.change_weights_op = optimizer.apply_gradients(passed_gvs)
+    
+        ## do L2
+        target_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)[-2:]
+        assignments = []
+        assignments.append(target_vars[0].assign(self.preds_W_grad))# abusing use of preds_W_grad
+        assignments.append(target_vars[1].assign(self.preds_b_grad))# abusing use of preds_b_grad
+        self.assign_last_layer = tf.group(*assignments)
 
     def initialize(self):
-        self.sess = tf.Session()
+        gpu_options = tf.GPUOptions(allow_growth=True)
+        self.sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+        #self.sess = tf.Session()
         init = tf.global_variables_initializer()
         self.sess.run(init)
 
@@ -151,19 +166,20 @@ class CIFAR10_Model(object):
             #optimizer = tf.train.MomentumOptimizer(learning_rate=self.lr, momentum=self.cfg.momentum, 
             #                                       use_nesterov=self.cfg.nesterov)
             optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.lr) # can set lr every minibatch
-        if self.cfg.optimizer=='sgd':
+        elif self.cfg.optimizer=='sgd':
             optimizer = tf.train.MomentumOptimizer(learning_rate=self.cfg.learning_rate, momentum=self.cfg.momentum, 
                                                    use_nesterov=self.cfg.nesterov)
         elif self.cfg.optimizer=='adam':
-            optimizer = tf.train.AdamOptimizer(learning_rate=self.cfg.learning_rate, beta1=self.cfg.beta1, beta2=self.cfg.beta2)
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.cfg.learning_rate, beta1=self.cfg.beta1, beta2=self.cfg.beta2,
+                                               epsilon=self.cfg.epsilon)
         elif self.cfg.optimizer=='adadelta':
-            optimizer = tf.train.AdadeltaOptimizer()
+            optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.cfg.learning_rate, rho=self.cfg.rho)
         gvs = optimizer.compute_gradients(self.loss, var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
         self.grads, vrbs = zip(*gvs)
         self.train_op = optimizer.apply_gradients(gvs)
 
         ### op to just apply passed gradients
-        self.conv1_W_grad = tf.placeholder(tf.float32, shape=(5,5,3,64), name='conv1_W_grad')
+        self.conv1_W_grad = tf.placeholder(tf.float32, shape=(5,5,self.cfg.input_nchannels,64), name='conv1_W_grad')
         self.conv1_b_grad = tf.placeholder(tf.float32, shape=(64), name='conv1_b_grad')
         self.conv2_W_grad = tf.placeholder(tf.float32, shape=(5,5,64,64), name='conv2_W_grad')
         self.conv2_b_grad = tf.placeholder(tf.float32, shape=(64), name='conv2_b_grad')
@@ -183,13 +199,100 @@ class CIFAR10_Model(object):
         self.change_weights_op = optimizer.apply_gradients(passed_gvs)
         
     def initialize(self):
-        self.sess = tf.Session()
+        gpu_options = tf.GPUOptions(allow_growth=True)
+        self.sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+        #self.sess = tf.Session()
+        init = tf.global_variables_initializer()
+        self.sess.run(init)
+
+
+class Autoencoder_Model(object):
+    def __init__(self, config):
+        self.cfg = config
+        self.create_autoencoder_model()
+        self.initialize()
+
+    def create_autoencoder_model(self):
+        """
+        Creates:
+        self.input_images
+        self.labels
+        self.lr
+        self.preds - pre-softmax predictions
+        self.loss
+        self.accuracy
+        self.grads
+        self.train_op
+        self.change_weights_op
+        """
+        ## input placeholders
+        self.input_images = tf.placeholder(tf.float32, shape=(None,self.cfg.input_dim), 
+                                           name='input_images')
+        self.lr           = tf.placeholder(tf.float32, shape=(), name='lr')
+        
+        ## forward pass, note how this is pre-softmax
+        enc1 = layers.fully_connected(self.input_images, num_outputs=self.cfg.h1_dim, activation_fn=tf.nn.tanh,
+                                     biases_initializer=layers.initializers.xavier_initializer(), scope='enc1')
+        enc2 = layers.fully_connected(enc1, num_outputs=self.cfg.h2_dim, activation_fn=tf.nn.tanh,
+                                     biases_initializer=layers.initializers.xavier_initializer(), scope='enc2')
+        dec2 = layers.fully_connected(enc2, num_outputs=self.cfg.h1_dim, activation_fn=tf.nn.tanh,
+                                     biases_initializer=layers.initializers.xavier_initializer(), scope='dec2')
+        dec1 = layers.fully_connected(dec2, num_outputs=self.cfg.input_dim, activation_fn=tf.nn.tanh,
+                                     biases_initializer=layers.initializers.xavier_initializer(), scope='dec1')
+        self.preds = dec1
+
+        ## loss
+        loss = tf.pow(self.input_images-self.preds, 2)
+        self.loss = tf.reduce_mean(loss, name='loss', axis=None)
+
+        ## training op
+        if self.cfg.optimizer=='kalpit':
+            #optimizer = tf.train.MomentumOptimizer(learning_rate=self.lr, momentum=self.cfg.momentum, 
+            #                                       use_nesterov=self.cfg.nesterov)
+            optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.lr) # can set lr every minibatch
+        elif self.cfg.optimizer=='sgd':
+            optimizer = tf.train.MomentumOptimizer(learning_rate=self.cfg.learning_rate, momentum=self.cfg.momentum, 
+                                                   use_nesterov=self.cfg.nesterov)
+        elif self.cfg.optimizer=='adam':
+            optimizer = tf.train.AdamOptimizer(learning_rate=self.cfg.learning_rate, beta1=self.cfg.beta1, beta2=self.cfg.beta2,
+                                               epsilon=self.cfg.epsilon)
+        elif self.cfg.optimizer=='adadelta':
+            optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.cfg.learning_rate, rho=self.cfg.rho)
+        gvs = optimizer.compute_gradients(self.loss, var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES))
+        self.grads, vrbs = zip(*gvs)
+        self.train_op = optimizer.apply_gradients(gvs)
+
+        ### op to just apply passed gradients
+        self.enc1_W_grad = tf.placeholder(tf.float32, shape=(self.cfg.input_dim,self.cfg.h1_dim), name='enc1_W_grad')
+        self.enc1_b_grad = tf.placeholder(tf.float32, shape=(self.cfg.h1_dim,), name='enc1_b_grad')
+        self.enc2_W_grad = tf.placeholder(tf.float32, shape=(self.cfg.h1_dim,self.cfg.h2_dim), name='enc2_W_grad')
+        self.enc2_b_grad = tf.placeholder(tf.float32, shape=(self.cfg.h2_dim,), name='enc2_b_grad')
+        self.dec2_W_grad = tf.placeholder(tf.float32, shape=(self.cfg.h2_dim,self.cfg.h1_dim), name='dec2_W_grad')
+        self.dec2_b_grad = tf.placeholder(tf.float32, shape=(self.cfg.h1_dim,), name='dec2_b_grad')
+        self.dec1_W_grad = tf.placeholder(tf.float32, shape=(self.cfg.h1_dim,self.cfg.input_dim), name='dec1_W_grad')
+        self.dec1_b_grad = tf.placeholder(tf.float32, shape=(self.cfg.input_dim,), name='dec1_b_grad')
+
+        passed_grads = [self.enc1_W_grad, self.enc1_b_grad,
+                        self.enc2_W_grad, self.enc2_b_grad,
+                        self.dec2_W_grad, self.dec2_b_grad,
+                        self.dec1_W_grad, self.dec1_b_grad]
+        passed_gvs = zip(passed_grads, vrbs)
+        self.change_weights_op = optimizer.apply_gradients(passed_gvs)
+        
+    def initialize(self):
+        gpu_options = tf.GPUOptions(allow_growth=True)
+        self.sess = tf.Session(config=tf.ConfigProto(gpu_options=gpu_options))
+        #self.sess = tf.Session()
         init = tf.global_variables_initializer()
         self.sess.run(init)
 
 
 def get_model(dataset_name, config):
-    if dataset_name=='mnist':
+    if dataset_name=='mnist_ff':
         return MNIST_Model(config)
-    elif dataset_name=='cifar10':
+    elif dataset_name=='mnist_conv':
+        return CIFAR10_Model(config)
+    elif dataset_name=='mnist_autoencoder':
+        return Autoencoder_Model(config)
+    elif dataset_name=='cifar10_conv':
         return CIFAR10_Model(config)
