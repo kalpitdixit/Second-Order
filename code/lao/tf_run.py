@@ -16,10 +16,10 @@ import tensorflow.contrib.layers as layers
 
 from data_handler import Dataset
 from common.models import get_model
-from train_funcs_dev import train_ff_vanilla,          train_ff_kalpit          # train functions
-from train_funcs_dev import train_conv_vanilla,        train_conv_kalpit        # train functions
-from train_funcs_dev import train_autoencoder_vanilla, train_autoencoder_kalpit # train functions
-from train_funcs_dev import validate_ff, validate_conv, validate_autoencoder    # validation functions
+from train_funcs import train_ff_vanilla,          train_ff_kalpit          # train functions
+from train_funcs import train_conv_vanilla,        train_conv_kalpit        # train functions
+from train_funcs import train_autoencoder_vanilla, train_autoencoder_kalpit # train functions
+from train_funcs import validate_ff, validate_conv, validate_autoencoder    # validation functions
 from common.utils import save_loss, plot_loss, get_save_dir
 
 DTYPE = 'float32'
@@ -67,6 +67,7 @@ class Config(object):
             self.epsilon       = args.epsilon 
         elif self.optimizer=='kalpit':
             self.momentum      = args.momentum
+            self.max_lr        = args.max_lr
             self.magic_2nd_order = False
         
     def save(self, save_dir):
@@ -164,6 +165,8 @@ def ArgumentParser():
     parser.add_argument('--epsilon', type=float, default=1e-8)  # adam
     # adadelta
     parser.add_argument('--rho', type=float, default=0.95)  # rho
+    # kalpit
+    parser.add_argument('--max_lr', type=float) # max_lr
     
     return parser.parse_args()
 

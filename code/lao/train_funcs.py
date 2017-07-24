@@ -8,6 +8,30 @@ import time
 from common.utils import save_loss, plot_loss
 
 
+def get_dixit_lr(loss, grads, moms, cfg):
+    fx = loss
+    gT_g = np.sum([np.sum(np.square(g)) for g in grads])
+    gT_d = np.sum([np.sum(grads[i]*moms[i]) for i in range(len(grads))])
+    dT_d = np.sum([np.sum(np.square(m)) for m in moms])
+    #lr = fx/gT_d
+    lr = fx/np.sqrt(gT_g)/np.sqrt(dT_d)
+    
+
+    lr = min(lr,cfg.max_lr)
+
+
+    ## print
+    if True:
+        print ''
+        print 'f(x)              : ', fx
+        print '(g.T)g            : ', gT_g
+        print '(g.T)d            : ', gT_d
+        print '(d.T)d            : ', dT_d
+        print 'lr                : ', lr
+        print 'update-size       : ', np.sum([np.sum(np.square(lr*m)) for m in moms])
+    return lr, lr # max_lr, lr
+
+
 def get_kalpit_lr(model, cfg, research_fd, fd, loss, alpha, grads):
     fx = loss
     gT_g = np.sum([np.sum(np.square(g)) for g in grads])
@@ -99,13 +123,13 @@ def train_ff_vanilla(model, dataset, cfg, save_dir):
                 print 'early stopping. no improvement since ', str(cfg.early_stopping), ' epochs.'
                 break
 
-        #vl, va = validate(model, dataset)
-        #val_loss.append(vl)
-        #val_acc.append(va)
-        #save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
+        vl, va = validate_ff(model, dataset)
+        val_loss.append(vl)
+        val_acc.append(va)
+        save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
     return train_loss, val_loss, val_acc
 
-
+ 
 def train_ff_kalpit(model, dataset, cfg, save_dir):
     train_loss_batch = [] # record_loss
     train_acc_batch = [] # record_accuracy
@@ -127,7 +151,6 @@ def train_ff_kalpit(model, dataset, cfg, save_dir):
         est = time.time()
         for batch_num in range(tot_batches):
             bst = time.time()
-            st = time.time()
             batch_inds = inds[batch_num*cfg.batch_size:min((batch_num+1)*cfg.batch_size,dataset.n_train)]
             ## get f(x) and gradients
             fd = {model.input_images: dataset.data['train_images'][batch_inds,:],
@@ -143,42 +166,42 @@ def train_ff_kalpit(model, dataset, cfg, save_dir):
             train_acc_batch.append(acc)
             print 'Epoch-Batch: {:3d}-{:3d}  train_loss: {:.3f}  train_acc:{:.3f}'.format(epoch+1,batch_num+1,
                                                                                           train_loss_batch[-1],train_acc_batch[-1])
-            print 'fx and grads: ', time.time()-st
             ## set research_fd. set fd to use old binary tensors.
-            st = time.time()
-            research_fd = {model.h1_W_grad: grads[0],    model.h1_b_grad: grads[1],
-                           model.h2_W_grad: grads[2],    model.h2_b_grad: grads[3],
-                           model.preds_W_grad: grads[4], model.preds_b_grad: grads[5],
-                          }
+            grads_fd = {model.h1_W_grad: grads[0],    model.h1_b_grad: grads[1],
+                        model.h2_W_grad: grads[2],    model.h2_b_grad: grads[3],
+                        model.preds_W_grad: grads[4], model.preds_b_grad: grads[5],
+                       }
             fd = {model.input_images: dataset.data['train_images'][batch_inds,:],
                   model.labels: dataset.data['train_labels'][batch_inds],
                   model.use_past_bt: True,
                   model.h1_past_bt: h1_bt,
                   model.h2_past_bt: h2_bt
                  }
-            print 'change fds: ', time.time()-st
-
-            ## get kalpit learning_rate
-            max_lr, lr = get_kalpit_lr(model, cfg, research_fd, fd, loss, alpha, grads)
-            max_lr_epoch.append(max_lr)
-            lr_epoch.append(lr)
 
             # momentum
             if moms==[]:
                 moms = grads[:]
             else:
                 moms = [model.cfg.momentum*moms[i] + grads[i] for i in range(len(moms))]
-            research_fd = {model.h1_W_grad: moms[0],    model.h1_b_grad: moms[1],
-                           model.h2_W_grad: moms[2],    model.h2_b_grad: moms[3],
-                           model.preds_W_grad: moms[4], model.preds_b_grad: moms[5],
-                          }
-            research_fd[model.lr] = lr
-            model.sess.run(model.change_weights_op, feed_dict=research_fd)
+            moms_fd = {model.h1_W_grad: moms[0],    model.h1_b_grad: moms[1],
+                      model.h2_W_grad: moms[2],    model.h2_b_grad: moms[3],
+                      model.preds_W_grad: moms[4], model.preds_b_grad: moms[5],
+                     }
+
+            ## get kalpit learning_rate
+            print 'USING DIXIT LR'
+            max_lr, lr = get_dixit_lr(loss, grads, moms, cfg)
+            #max_lr, lr = get_kalpit_lr(model, cfg, grads_fd, fd, loss, alpha, grads)
+            max_lr_epoch.append(max_lr)
+            lr_epoch.append(lr)
+
+            ## update step
+            moms_fd[model.lr] = lr
+            model.sess.run(model.change_weights_op, feed_dict=moms_fd)
 
             ## update alpha
             alpha = min(lr/2, 1e-1)
 
-            print 'quit? final update, alpha: ', time.time()-st
             print 'batch_time: ', time.time()-bst
             print '_'*100
         print 'avg_batch_time: ', (time.time()-est)/tot_batches
@@ -188,10 +211,10 @@ def train_ff_kalpit(model, dataset, cfg, save_dir):
         save_loss(lr_epoch, save_dir, 'learning_rates.txt')
         save_loss(train_loss[-1:], save_dir, 'training_cost.txt')
         print 'Epoch {} - Average Training Cost: {:.3f}'.format(epoch+1, train_loss[-1])
-        #vl, va = validate(model, dataset)
-        #val_loss.append(vl)
-        #val_acc.append(va)
-        #save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
+        vl, va = validate_ff(model, dataset)
+        val_loss.append(vl)
+        val_acc.append(va)
+        save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
     return train_loss, val_loss, val_acc
 
 
@@ -233,10 +256,10 @@ def train_conv_vanilla(model, dataset, cfg, save_dir):
                 print 'early stopping. no improvement since ', str(cfg.early_stopping), ' epochs.'
                 break
 
-        #vl, va = validate(model, dataset)
-        #val_loss.append(vl)
-        #val_acc.append(va)
-        #save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
+        vl, va = validate_conv(model, dataset)
+        val_loss.append(vl)
+        val_acc.append(va)
+        save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
     return train_loss, val_loss, val_acc
 
 
@@ -290,26 +313,27 @@ def train_conv_kalpit(model, dataset, cfg, save_dir):
                   model.input_past_bt: input_bt,
                   model.fc4_past_bt: fc4_bt
                  }
-
-            ## get kalpit learning_rate
-            max_lr, lr = get_kalpit_lr(model, cfg, research_fd, fd, loss, alpha, grads)
-            max_lr_epoch.append(max_lr)
-            lr_epoch.append(lr)
-
-            ## update step
             # momentum
             if moms==[]:
                 moms = grads[:]
             else:
                 moms = [model.cfg.momentum*moms[i] + grads[i] for i in range(len(moms))]
-            research_fd = {model.conv1_W_grad: moms[0],    model.conv1_b_grad: moms[1],
-                           model.conv2_W_grad: moms[2],    model.conv2_b_grad: moms[3],
-                           model.conv3_W_grad: moms[4],    model.conv3_b_grad: moms[5],
-                           model.fc4_W_grad: moms[6],      model.fc4_b_grad: moms[7],
-                           model.fc5_W_grad: moms[8],      model.fc5_b_grad: moms[9]
-                          }
-            research_fd[model.lr] = lr
-            model.sess.run(model.change_weights_op, feed_dict=research_fd)
+            moms_fd = {model.conv1_W_grad: moms[0],    model.conv1_b_grad: moms[1],
+                       model.conv2_W_grad: moms[2],    model.conv2_b_grad: moms[3],
+                       model.conv3_W_grad: moms[4],    model.conv3_b_grad: moms[5],
+                       model.fc4_W_grad: moms[6],      model.fc4_b_grad: moms[7],
+                       model.fc5_W_grad: moms[8],      model.fc5_b_grad: moms[9]                       }
+
+            ## get kalpit learning_rate
+            print 'USING DIXIT LR'
+            max_lr, lr = get_dixit_lr(loss, grads, moms, cfg)
+            #max_lr, lr = get_kalpit_lr(model, cfg, grads_fd, fd, loss, alpha, grads)
+            max_lr_epoch.append(max_lr)
+            lr_epoch.append(lr)
+
+            ## update step
+            moms_fd[model.lr] = lr
+            model.sess.run(model.change_weights_op, feed_dict=moms_fd)
 
             ## update alpha
             alpha = min(lr/2, 1e-1)
@@ -323,10 +347,10 @@ def train_conv_kalpit(model, dataset, cfg, save_dir):
         save_loss(lr_epoch, save_dir, 'learning_rates.txt')
         save_loss(train_loss[-1:], save_dir, 'training_cost.txt')
         print 'Epoch {} - Average Training Cost: {:.3f}'.format(epoch+1, train_loss[-1])
-        #vl, va = validate(model, dataset)
-        #val_loss.append(vl)
-        #val_acc.append(va)
-        #save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
+        vl, va = validate_conv(model, dataset)
+        val_loss.append(vl)
+        val_acc.append(va)
+        save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
     return train_loss, val_loss, val_acc
 
 
@@ -363,9 +387,9 @@ def train_autoencoder_vanilla(model, dataset, cfg, save_dir):
                 print 'early stopping. no improvement since ', str(cfg.early_stopping), ' epochs.'
                 break
 
-        #vl, va = validate(model, dataset)
-        #val_loss.append(vl)
-        #save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
+        vl, va = validate_autoencoder(model, dataset)
+        val_loss.append(vl)
+        save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
     return train_loss, val_loss
 
 
@@ -438,9 +462,9 @@ def train_autoencoder_kalpit(model, dataset, cfg, save_dir):
         print 'Epoch {} - Average Training Cost: {:.3f}'.format(epoch+1, train_loss[-1])
         if converged:
             break
-        #vl, va = validate(model, dataset)
-        #val_loss.append(vl)
-        #save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
+        vl, va = validate_autoencoder(model, dataset)
+        val_loss.append(vl)
+        save_loss(val_loss[-1:], save_dir, 'validation_cost.txt')
     return train_loss, val_loss
 
 
