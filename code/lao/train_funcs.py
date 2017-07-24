@@ -16,7 +16,7 @@ def get_dixit_lr(loss, grads, moms, cfg):
     #lr = fx/gT_d
     lr = fx/np.sqrt(gT_g)/np.sqrt(dT_d)
     
-
+    print 'USING cfg.max_lr'
     lr = min(lr,cfg.max_lr)
 
 
